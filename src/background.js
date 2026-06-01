@@ -70,10 +70,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function toggleLayout(tab) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
-  const message = { type: "ARG_SCOUT_TOGGLE_LAYOUT" };
+  const state = await loadState();
+  const isTracked = isTrackedUrl(tab.url, state);
+  const isHidden = isHiddenUrl(tab.url, state);
+
+  if (isTracked && !isHidden) {
+    addHiddenSiteFromUrl(state, tab.url);
+    await saveState(state);
+    await sendLayoutMessage(tab, { type: "ARG_SCOUT_HIDE_LAYOUT" });
+    await forceHideLayout(tab);
+    return;
+  }
+
+  addTrackedSiteFromUrl(state, tab.url);
+  removeHiddenSiteFromUrl(state, tab.url);
+  await saveState(state);
+  await forceRevealLayoutHost(tab);
+  await sendLayoutMessage(tab, {
+    type: "ARG_SCOUT_SHOW_LAYOUT",
+    rememberSite: true,
+    clearHidden: true
+  });
+}
+
+async function sendLayoutMessage(tab, message) {
+  if (!isSavableTab(tab) || tab.id == null) return;
 
   try {
-    await chrome.tabs.sendMessage(tab.id, message);
+    const response = await chrome.tabs.sendMessage(tab.id, message);
+    if (response?.ok === false) throw new Error(response.error || "Layout message failed");
   } catch {
     try {
       await chrome.scripting.executeScript({
@@ -93,6 +118,46 @@ async function toggleLayout(tab) {
   }
 }
 
+async function forceHideLayout(tab) {
+  if (!isSavableTab(tab) || tab.id == null) return;
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const host = document.querySelector("arg-scout-layout");
+        if (host) {
+          host.hidden = true;
+          host.style.display = "none";
+        }
+        document.documentElement.classList.remove("arg-scout-layout-active");
+        document.getElementById("arg-scout-layout-style")?.remove();
+      }
+    });
+  } catch {
+    // Some browser pages do not allow injected scripts.
+  }
+}
+
+async function forceRevealLayoutHost(tab) {
+  if (!isSavableTab(tab) || tab.id == null) return;
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const host = document.querySelector("arg-scout-layout");
+        if (host) {
+          host.hidden = false;
+          host.style.display = "";
+        }
+      }
+    });
+  } catch {
+    // Some browser pages do not allow injected scripts.
+  }
+}
+
 async function showLayout(tab, options = {}) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
@@ -102,17 +167,9 @@ async function showLayout(tab, options = {}) {
   };
 
   try {
-    await chrome.tabs.sendMessage(tab.id, message);
+    await sendLayoutMessage(tab, message);
   } catch {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ["src/content.js"]
-      });
-      await chrome.tabs.sendMessage(tab.id, message);
-    } catch {
-      // The current page may disallow extension scripts.
-    }
+    // The current page may disallow extension scripts.
   }
 }
 
@@ -124,6 +181,12 @@ function isSavableTab(tab) {
 async function loadState() {
   const result = await chrome.storage.local.get([STORAGE_KEY]);
   return sanitizeState(result[STORAGE_KEY]);
+}
+
+async function saveState(state) {
+  state.version = STATE_VERSION;
+  state.updatedAt = new Date().toISOString();
+  await chrome.storage.local.set({ [STORAGE_KEY]: state });
 }
 
 function sanitizeState(raw) {
@@ -216,6 +279,19 @@ function addTrackedSiteFromUrl(state, url) {
   if (base && !state.trackedSites.includes(base)) {
     state.trackedSites.push(base);
   }
+}
+
+function addHiddenSiteFromUrl(state, url) {
+  const base = normalizeSiteBase(url);
+  if (base && !state.hiddenSites.includes(base)) {
+    state.hiddenSites.push(base);
+  }
+}
+
+function removeHiddenSiteFromUrl(state, url) {
+  const base = normalizeSiteBase(url);
+  if (!base) return;
+  state.hiddenSites = state.hiddenSites.filter((site) => site !== base);
 }
 
 function isTrackedUrl(url, state) {

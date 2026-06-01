@@ -44,10 +44,19 @@
       }
 
       if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
-        showLayout({ rememberSite: Boolean(message.rememberSite), clearHidden: true })
+        showLayout({
+          rememberSite: Boolean(message.rememberSite),
+          clearHidden: message.clearHidden !== false
+        })
           .then(() => sendResponse({ ok: true, visible: true }))
           .catch((error) => sendResponse({ ok: false, error: error.message }));
         return true;
+      }
+
+      if (message?.type === "ARG_SCOUT_HIDE_LAYOUT") {
+        hideLayout();
+        sendResponse({ ok: true, visible: false });
+        return;
       }
 
       if (message?.type === "ARG_SCOUT_TOGGLE_LAYOUT") {
@@ -63,6 +72,10 @@
 
       if (changes[STORAGE_KEY]?.newValue) {
         state = sanitizeState(changes[STORAGE_KEY].newValue);
+        if (isHiddenUrl(location.href)) {
+          hideLayout();
+          return;
+        }
         renderAll();
       }
 
@@ -93,6 +106,7 @@
     await saveState();
     await consumePendingSelection();
     layout.host.hidden = false;
+    layout.host.style.display = "";
     syncInputsWithCurrentPage();
     renderAll();
   }
@@ -113,6 +127,7 @@
   function hideLayout() {
     if (layout) {
       layout.host.hidden = true;
+      layout.host.style.display = "none";
     }
     resetPageLayout();
   }
