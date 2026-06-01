@@ -107,6 +107,7 @@
           <header class="bar-head">
             <span>KEYWORDS</span>
             <strong id="keywordCount">0</strong>
+            <em id="saveStatus" class="save-status"></em>
           </header>
           <form id="pageForm" class="page-form">
             <label>
@@ -121,13 +122,9 @@
               KEYWORD
               <input id="keywordInput" type="text" placeholder="このページへ行けたキーワード">
             </label>
-            <button id="savePageButton" type="submit">保存</button>
+            <button id="savePageButton" type="submit">ページ保存</button>
+            <button id="stashKeywordButton" type="button">一時保存</button>
           </form>
-          <div class="url-row">
-            <span>URL</span>
-            <code id="urlPreview"></code>
-            <span id="saveStatus" class="save-status"></span>
-          </div>
           <ul id="keywordList" class="keyword-list"></ul>
         </section>
       </div>
@@ -144,6 +141,7 @@
     );
 
     els.pageForm.addEventListener("submit", saveCurrentPage);
+    els.stashKeywordButton.addEventListener("click", stashCurrentKeyword);
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
@@ -187,7 +185,6 @@
     renderPages();
     renderKeywords();
     renderProgress();
-    renderCurrentUrl();
   }
 
   function renderPages() {
@@ -267,10 +264,6 @@
     els.targetPagesInput.value = total || "";
   }
 
-  function renderCurrentUrl() {
-    els.urlPreview.textContent = location.href;
-  }
-
   function syncInputsWithCurrentPage() {
     const current = state.entries.find((entry) => entry.url === location.href);
     els.currentPageInput.value = current?.pageNo || suggestNextPageNo();
@@ -333,6 +326,19 @@
     await requestBadgeRefresh();
     setSaveStatus("保存しました", false);
     renderAll();
+  }
+
+  async function stashCurrentKeyword() {
+    const keyword = els.keywordInput.value.trim();
+    if (!keyword) {
+      setSaveStatus("キーワードを入力してください", true);
+      return;
+    }
+
+    addKeywordToState("primary", keyword);
+    await saveState();
+    setSaveStatus("一時保存しました", false);
+    renderKeywords();
   }
 
   function allowDrop(event) {
@@ -535,8 +541,7 @@
 
       button,
       input,
-      select,
-      code {
+      select {
         font: inherit;
       }
 
@@ -708,7 +713,7 @@
         border-bottom: 0;
         border-radius: 6px 6px 0 0;
         display: grid;
-        grid-template-rows: 30px auto auto minmax(34px, 1fr);
+        grid-template-rows: 30px auto minmax(58px, 1fr);
       }
 
       .bar-head {
@@ -718,11 +723,12 @@
 
       .bar-head strong {
         margin-left: auto;
+        margin-right: 12px;
       }
 
       .page-form {
         display: grid;
-        grid-template-columns: 92px 92px minmax(180px, 1fr) 76px;
+        grid-template-columns: 84px 92px minmax(220px, 1fr) 92px 92px;
         gap: 8px;
         align-items: end;
         padding: 10px 12px 0;
@@ -759,25 +765,11 @@
         cursor: pointer;
       }
 
-      .url-row {
-        display: grid;
-        grid-template-columns: auto minmax(0, 1fr) auto;
-        gap: 8px;
-        align-items: center;
-        color: #7c8ca0;
-        padding: 6px 12px 0;
-      }
-
-      .url-row code {
-        overflow: hidden;
-        color: #9daabe;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
       .save-status {
-        min-width: 8em;
+        min-width: 10em;
         color: #19d2a0;
+        font-style: normal;
+        font-weight: 700;
         text-align: right;
       }
 
@@ -792,7 +784,7 @@
         gap: 7px;
         min-height: 0;
         margin: 0;
-        padding: 9px 12px 12px;
+        padding: 12px;
         list-style: none;
         overflow: auto;
       }
@@ -851,6 +843,11 @@
 
         .keyword-field {
           grid-column: 1 / -1;
+        }
+
+        #savePageButton,
+        #stashKeywordButton {
+          grid-column: auto;
         }
       }
     `;
