@@ -1,6 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
+const STATE_VERSION = 4;
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
@@ -14,8 +15,17 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup?.addListener(updateBadge);
 
 chrome.action.onClicked.addListener(async (tab) => {
-  await showLayout(tab);
+  await showLayout(tab, { rememberSite: true });
   await updateBadge();
+});
+
+chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !isSavableTab(tab)) return;
+
+  const state = await loadState();
+  if (isTrackedUrl(tab.url, state)) {
+    await showLayout(tab, { rememberSite: false });
+  }
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -36,7 +46,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   });
 
-  await showLayout(tab);
+  await showLayout(tab, { rememberSite: true });
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -48,7 +58,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
-    showLayout(message.tab || sender.tab)
+    showLayout(message.tab || sender.tab, { rememberSite: Boolean(message.rememberSite) })
       .then(() => sendResponse({ ok: true }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
@@ -57,10 +67,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function showLayout(tab) {
+async function showLayout(tab, options = {}) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
-  const message = { type: "ARG_SCOUT_SHOW_LAYOUT" };
+  const message = {
+    type: "ARG_SCOUT_SHOW_LAYOUT",
+    rememberSite: Boolean(options.rememberSite)
+  };
 
   try {
     await chrome.tabs.sendMessage(tab.id, message);
@@ -89,9 +102,10 @@ async function loadState() {
 
 function sanitizeState(raw) {
   const state = {
-    version: 3,
+    version: STATE_VERSION,
     sessionTitle: "ARG探索メモ",
     targetPages: 0,
+    trackedSites: [],
     entries: [],
     keywords: {
       primary: [],
@@ -102,16 +116,23 @@ function sanitizeState(raw) {
 
   if (!raw || typeof raw !== "object") return state;
 
-  state.version = 3;
+  state.version = STATE_VERSION;
   state.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
     ? raw.sessionTitle
     : state.sessionTitle;
   state.targetPages = parsePositiveInt(raw.targetPages) || 0;
   state.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
+  state.trackedSites = sanitizeTrackedSites(raw.trackedSites);
+  state.entries.forEach((entry) => addTrackedSiteFromUrl(state, entry.url));
   state.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
   state.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
   state.updatedAt = raw.updatedAt || null;
   return state;
+}
+
+function sanitizeTrackedSites(value) {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(normalizeSiteBase).filter(Boolean))];
 }
 
 function sanitizeEntry(entry) {
@@ -148,6 +169,30 @@ function sanitizeKeywordArray(value) {
 function parsePositiveInt(value) {
   const number = Number.parseInt(value, 10);
   return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function normalizeSiteBase(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    const url = new URL(raw);
+    return /^https?:$/.test(url.protocol) ? url.origin : "";
+  } catch {
+    return "";
+  }
+}
+
+function addTrackedSiteFromUrl(state, url) {
+  const base = normalizeSiteBase(url);
+  if (base && !state.trackedSites.includes(base)) {
+    state.trackedSites.push(base);
+  }
+}
+
+function isTrackedUrl(url, state) {
+  const base = normalizeSiteBase(url);
+  return Boolean(base && state.trackedSites.includes(base));
 }
 
 async function updateBadge() {

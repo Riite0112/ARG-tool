@@ -7,14 +7,16 @@
   const DEFAULT_SESSION_TITLE = "ARG探索メモ";
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
   const ROOT_CLASS = "arg-scout-layout-active";
+  const STATE_VERSION = 4;
   const LEFT_WIDTH = 204;
   const BOTTOM_HEIGHT = 150;
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
 
   const initialState = {
-    version: 3,
+    version: STATE_VERSION,
     sessionTitle: DEFAULT_SESSION_TITLE,
     targetPages: 0,
+    trackedSites: [],
     entries: [],
     keywords: {
       primary: [],
@@ -39,7 +41,7 @@
       }
 
       if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
-        showLayout();
+        showLayout({ rememberSite: Boolean(message.rememberSite) });
         sendResponse({ ok: true });
       }
     });
@@ -53,19 +55,25 @@
       }
 
       if (changes.pendingSelection?.newValue?.text) {
-        showLayout();
+        showLayout({ rememberSite: true });
       }
     });
+
+    checkAutoOpen();
   } else if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", showLayout);
   } else {
     showLayout();
   }
 
-  async function showLayout() {
+  async function showLayout(options = {}) {
     ensureLayout();
     applyPageLayout();
     await loadState();
+    if (options.rememberSite) {
+      rememberCurrentSite();
+      await saveState();
+    }
     await consumePendingSelection();
     layout.host.hidden = false;
     syncInputsWithCurrentPage();
@@ -298,6 +306,8 @@
       state.targetPages = targetPages;
     }
 
+    rememberCurrentSite();
+
     const now = new Date().toISOString();
     const existing = state.entries.find((entry) => entry.url === location.href || entry.pageNo === pageNo);
     const entry = {
@@ -380,7 +390,7 @@
   }
 
   async function saveState() {
-    state.version = 3;
+    state.version = STATE_VERSION;
     state.updatedAt = new Date().toISOString();
 
     if (!canUseExtensionApi) {
@@ -395,12 +405,14 @@
     const next = structuredClone(initialState);
     if (!raw || typeof raw !== "object") return next;
 
-    next.version = 3;
+    next.version = STATE_VERSION;
     next.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
       ? raw.sessionTitle
       : DEFAULT_SESSION_TITLE;
     next.targetPages = parsePositiveInt(raw.targetPages) || 0;
     next.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
+    next.trackedSites = sanitizeTrackedSites(raw.trackedSites);
+    next.entries.forEach((entry) => addTrackedSiteFromUrl(next, entry.url));
     next.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
     next.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
     next.updatedAt = raw.updatedAt || null;
@@ -437,6 +449,11 @@
         createdAt: item?.createdAt || new Date().toISOString()
       }))
       .filter((item) => item.text);
+  }
+
+  function sanitizeTrackedSites(value) {
+    if (!Array.isArray(value)) return [];
+    return [...new Set(value.map(normalizeSiteBase).filter(Boolean))];
   }
 
   function savedPages() {
@@ -500,6 +517,45 @@
   function getIconUrl() {
     if (canUseExtensionApi) return chrome.runtime.getURL("icons/icon-32.png");
     return "/icons/icon-32.png";
+  }
+
+  async function checkAutoOpen() {
+    try {
+      await loadState();
+      if (isTrackedUrl(location.href)) {
+        await showLayout({ rememberSite: false });
+      }
+    } catch {
+      // Auto-open is a convenience; manual open still works.
+    }
+  }
+
+  function rememberCurrentSite() {
+    addTrackedSiteFromUrl(state, location.href);
+  }
+
+  function addTrackedSiteFromUrl(targetState, url) {
+    const base = normalizeSiteBase(url);
+    if (base && !targetState.trackedSites.includes(base)) {
+      targetState.trackedSites.push(base);
+    }
+  }
+
+  function isTrackedUrl(url) {
+    const base = normalizeSiteBase(url);
+    return Boolean(base && state.trackedSites.includes(base));
+  }
+
+  function normalizeSiteBase(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+
+    try {
+      const url = new URL(raw);
+      return /^https?:$/.test(url.protocol) ? url.origin : "";
+    } catch {
+      return "";
+    }
   }
 
   async function requestBadgeRefresh() {
