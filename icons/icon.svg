@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="ARG探索ツールのアイコン">
+  <defs>
+    <linearGradient id="bg" x1="16" y1="10" x2="112" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#18231f"/>
+      <stop offset="1" stop-color="#243a34"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="38" y1="34" x2="89" y2="89" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5ff0b1"/>
+      <stop offset="1" stop-color="#1f7a5a"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <path d="M28 33h40M28 49h24M28 65h18M28 81h25" stroke="#d7dfdb" stroke-width="7" stroke-linecap="round" opacity=".72"/>
+  <path d="M23 100c17-11 31-11 45 0 15 11 28 11 44-1" fill="none" stroke="#f0b84b" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="76" cy="62" r="25" fill="none" stroke="url(#lens)" stroke-width="11"/>
+  <path d="M95 81l21 21" stroke="#5ff0b1" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="76" cy="62" r="9" fill="#f6fbf8"/>
+  <circle cx="42" cy="99" r="6" fill="#f0b84b"/>
+  <circle cx="87" cy="101" r="6" fill="#f0b84b"/>
+</svg>

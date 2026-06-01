@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ARG探索ツール</title>
+    <link rel="stylesheet" href="panel.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <input id="sessionTitle" class="title-input" aria-label="調査名" value="ARG探索メモ">
+        <p id="activePage" class="active-page">現在のページなし</p>
+      </div>
+      <button id="saveCurrentPage" class="primary-button" type="button">ページ追加</button>
+    </header>
+
+    <nav class="tabs" aria-label="ツール切り替え">
+      <button class="tab-button active" type="button" data-tab="log">ログ</button>
+      <button class="tab-button" type="button" data-tab="keywords">キーワード</button>
+      <button class="tab-button" type="button" data-tab="decode">デコード</button>
+      <button class="tab-button" type="button" data-tab="data">データ</button>
+    </nav>
+
+    <main>
+      <section id="selectionBanner" class="selection-banner hidden">
+        <p id="selectionPreview"></p>
+        <div class="button-row">
+          <button id="selectionToKeyword" type="button">キーワードへ</button>
+          <button id="selectionToDecoder" type="button">デコードへ</button>
+          <button id="clearSelection" type="button" aria-label="選択テキストを消去">消去</button>
+        </div>
+      </section>
+
+      <section class="tab-panel active" data-panel="log">
+        <form id="logForm" class="stack-form">
+          <div class="form-grid">
+            <label>
+              ページ
+              <input id="entryPage" type="number" min="1" inputmode="numeric">
+            </label>
+            <label>
+              状態
+              <select id="entryStatus">
+                <option value="open">未確認</option>
+                <option value="checked">確認済み</option>
+                <option value="solved">解決済み</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            手がかり
+            <input id="entryClue" type="text" placeholder="キーワード、手がかり、ページ名">
+          </label>
+          <label>
+            URL
+            <input id="entryUrl" type="url" placeholder="https://example.com/clue">
+          </label>
+          <label>
+            メモ
+            <textarea id="entryNotes" rows="2" placeholder="気づいたこと、仮説、解けた内容"></textarea>
+          </label>
+          <button class="primary-button" type="submit">手動で追加</button>
+        </form>
+
+        <div class="toolbar">
+          <input id="logSearch" type="search" placeholder="ログ検索">
+          <select id="statusFilter" aria-label="状態で絞り込み">
+            <option value="all">すべて</option>
+            <option value="open">未確認</option>
+            <option value="checked">確認済み</option>
+            <option value="solved">解決済み</option>
+          </select>
+        </div>
+
+        <div id="gapWarnings" class="gap-warnings"></div>
+        <ol id="logList" class="log-list"></ol>
+      </section>
+
+      <section class="tab-panel" data-panel="keywords">
+        <form id="keywordForm" class="inline-form">
+          <input id="keywordInput" type="text" placeholder="キーワードを追加">
+          <select id="keywordTarget" aria-label="追加先">
+            <option value="primary">主力</option>
+            <option value="reserve">保留</option>
+          </select>
+          <button class="primary-button" type="submit">追加</button>
+        </form>
+
+        <div class="keyword-columns">
+          <section>
+            <h2>主力</h2>
+            <ul id="primaryKeywords" class="keyword-list"></ul>
+          </section>
+          <section>
+            <h2>保留</h2>
+            <ul id="reserveKeywords" class="keyword-list"></ul>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-panel="decode">
+        <div class="toolbar">
+          <button id="pullSelection" type="button">選択を取得</button>
+          <button id="decodeToKeyword" type="button">キーワードへ</button>
+          <button id="decodeToLog" type="button">ログへ</button>
+        </div>
+        <textarea id="decoderInput" class="decoder-input" rows="7" placeholder="怪しい文字列、暗号文、モールス、バイナリ、URLなどを貼り付け"></textarea>
+        <div class="form-grid">
+          <label>
+            シーザーシフト
+            <input id="caesarShift" type="number" min="-25" max="25" value="13">
+          </label>
+          <label>
+            抽出パターン
+            <select id="extractPattern">
+              <option value="urls">URLs</option>
+              <option value="emails">メールアドレス</option>
+              <option value="numbers">数字</option>
+              <option value="caps">大文字</option>
+            </select>
+          </label>
+        </div>
+        <div id="decoderResults" class="decoder-results"></div>
+      </section>
+
+      <section class="tab-panel" data-panel="data">
+        <div class="data-actions">
+          <button id="exportJson" class="primary-button" type="button">JSONを書き出し</button>
+          <label class="file-button">
+            JSONを読み込み
+            <input id="importJson" type="file" accept="application/json,.json">
+          </label>
+          <button id="resetData" class="danger-button" type="button">リセット</button>
+        </div>
+        <div id="summary" class="summary"></div>
+      </section>
+    </main>
+
+    <template id="entryTemplate">
+      <li class="log-item">
+        <div class="log-item-top">
+          <input class="entry-page" type="number" min="1" aria-label="ページ番号">
+          <select class="entry-status" aria-label="状態">
+            <option value="open">未確認</option>
+            <option value="checked">確認済み</option>
+            <option value="solved">解決済み</option>
+          </select>
+          <input class="entry-color" type="color" aria-label="ログの色">
+          <button class="copy-entry" type="button">コピー</button>
+          <button class="delete-entry" type="button">削除</button>
+        </div>
+        <input class="entry-clue" type="text" aria-label="手がかり">
+        <input class="entry-url" type="url" aria-label="URL">
+        <textarea class="entry-notes" rows="2" aria-label="メモ"></textarea>
+      </li>
+    </template>
+
+    <template id="keywordTemplate">
+      <li class="keyword-item">
+        <span class="keyword-text"></span>
+        <div class="keyword-actions">
+          <button class="use-keyword" type="button">使う</button>
+          <button class="move-keyword" type="button">移動</button>
+          <button class="delete-keyword" type="button">削除</button>
+        </div>
+      </li>
+    </template>
+
+    <script src="panel.js"></script>
+  </body>
+</html>
