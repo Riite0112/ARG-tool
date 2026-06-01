@@ -9,7 +9,7 @@
   const DEFAULT_SESSION_TITLE = "ARG探索メモ";
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
   const ROOT_CLASS = "arg-scout-layout-active";
-  const STATE_VERSION = 6;
+  const STATE_VERSION = 7;
   const LEFT_WIDTH = 204;
   const BOTTOM_HEIGHT = 150;
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
@@ -158,12 +158,13 @@
       <div class="layout-root" aria-live="polite">
         <aside class="side-panel">
           <header class="side-brand">
-            <img class="brand-icon" src="${getIconUrl()}" alt="ARG探索ツール">
-            <div class="session-meta">
-              <strong id="sessionTitle">ARG探索メモ</strong>
-              <small id="sessionSite"></small>
+            <div class="brand-row">
+              <img class="brand-icon" src="${getIconUrl()}" alt="ARG探索ツール">
+              <select id="sessionSelect" title="ARGを切り替え"></select>
+              <button id="newArgButton" class="new-arg-button" type="button" title="現在のサイトを新しいARGとして追加">+ ARG</button>
             </div>
-            <button id="newArgButton" class="new-arg-button" type="button" title="現在のサイトを新しいARGとして追加">+ ARG</button>
+            <input id="sessionTitleInput" class="session-title-input" type="text" placeholder="ARGタイトル">
+            <small id="sessionSite" class="session-site"></small>
           </header>
           <div class="table-head">
             <span>#</span>
@@ -219,6 +220,8 @@
     els.pageForm.addEventListener("submit", saveCurrentPage);
     els.stashKeywordButton.addEventListener("click", stashCurrentKeyword);
     els.newArgButton.addEventListener("click", createArgSession);
+    els.sessionSelect.addEventListener("change", switchSession);
+    els.sessionTitleInput.addEventListener("change", updateSessionTitle);
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
@@ -271,7 +274,15 @@
   }
 
   function renderSession() {
-    els.sessionTitle.textContent = state.sessionTitle || DEFAULT_SESSION_TITLE;
+    els.sessionSelect.textContent = "";
+    store.sessions.forEach((session) => {
+      const option = document.createElement("option");
+      option.value = session.id;
+      option.textContent = session.sessionTitle || DEFAULT_SESSION_TITLE;
+      els.sessionSelect.append(option);
+    });
+    els.sessionSelect.value = state.id;
+    els.sessionTitleInput.value = state.sessionTitle || DEFAULT_SESSION_TITLE;
     els.sessionSite.textContent = normalizeSiteBase(location.href).replace(/^https?:\/\//, "");
   }
 
@@ -441,7 +452,32 @@
     await saveState();
     syncInputsWithCurrentPage();
     renderAll();
+    els.sessionTitleInput.focus();
+    els.sessionTitleInput.select();
     setSaveStatus("新しいARGを追加しました", false);
+  }
+
+  async function switchSession() {
+    await loadStore();
+    const selected = store.sessions.find((session) => session.id === els.sessionSelect.value);
+    if (!selected) return;
+
+    state = selected;
+    rememberCurrentSite();
+    forgetHiddenCurrentSite();
+    store.activeSessionId = state.id;
+    await saveState();
+    syncInputsWithCurrentPage();
+    renderAll();
+    setSaveStatus("ARGを切り替えました", false);
+  }
+
+  async function updateSessionTitle() {
+    const title = els.sessionTitleInput.value.trim();
+    state.sessionTitle = title || defaultSessionTitle(location.href);
+    await saveState();
+    renderSession();
+    setSaveStatus("タイトルを保存しました", false);
   }
 
   function allowDrop(event) {
@@ -846,54 +882,44 @@
         bottom: ${BOTTOM_HEIGHT + 8}px;
         width: 188px;
         display: grid;
-        grid-template-rows: 58px auto minmax(0, 1fr) 58px;
+        grid-template-rows: 112px auto minmax(0, 1fr) 58px;
         overflow: hidden;
         border-radius: 6px;
       }
 
       .side-brand {
-        display: flex;
-        align-items: center;
-        gap: 8px;
+        display: grid;
+        align-content: center;
+        gap: 6px;
         min-width: 0;
-        padding: 0 10px;
+        padding: 10px;
         border-bottom: 1px solid rgba(72, 95, 127, 0.8);
+      }
+
+      .brand-row {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
       }
 
       .brand-icon {
         width: 28px;
         height: 28px;
-        flex: 0 0 auto;
         border-radius: 7px;
         object-fit: contain;
       }
 
-      .session-meta {
-        display: grid;
-        min-width: 0;
-        gap: 1px;
-      }
-
-      .session-meta strong,
-      .session-meta small {
+      .session-site {
         overflow: hidden;
+        color: #7c8ca0;
+        font-size: 9px;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
-      .session-meta strong {
-        color: #eff7f4;
-        font-size: 11px;
-        font-weight: 900;
-      }
-
-      .session-meta small {
-        color: #7c8ca0;
-        font-size: 9px;
-      }
-
       .new-arg-button {
-        flex: 0 0 auto;
         min-height: 25px;
         border: 1px solid rgba(25, 210, 160, 0.76);
         border-radius: 5px;
@@ -903,6 +929,23 @@
         font-weight: 900;
         padding: 4px 6px;
         cursor: pointer;
+      }
+
+      .session-title-input,
+      .brand-row select {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid rgba(72, 95, 127, 0.9);
+        border-radius: 5px;
+        background: rgba(5, 10, 22, 0.88);
+        color: #dce8f2;
+        font-size: 10px;
+        font-weight: 800;
+        padding: 6px 7px;
+      }
+
+      .session-title-input {
+        font-size: 11px;
       }
 
       .table-head {

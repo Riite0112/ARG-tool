@@ -1,7 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 6;
+const STATE_VERSION = 7;
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
