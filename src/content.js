@@ -1,13 +1,15 @@
 (() => {
   if (globalThis.__ARG_SCOUT_CONTENT_LOADED__) return;
   globalThis.__ARG_SCOUT_CONTENT_LOADED__ = true;
+  const suppressAutoOpenOnLoad = Boolean(globalThis.__ARG_SCOUT_SUPPRESS_AUTO_OPEN_ON_LOAD__);
+  delete globalThis.__ARG_SCOUT_SUPPRESS_AUTO_OPEN_ON_LOAD__;
 
   const STORAGE_KEY = "argScoutState";
   const MANUAL_SOURCE = "manual-entry";
   const DEFAULT_SESSION_TITLE = "ARG探索メモ";
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
   const ROOT_CLASS = "arg-scout-layout-active";
-  const STATE_VERSION = 4;
+  const STATE_VERSION = 5;
   const LEFT_WIDTH = 204;
   const BOTTOM_HEIGHT = 150;
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
@@ -17,6 +19,7 @@
     sessionTitle: DEFAULT_SESSION_TITLE,
     targetPages: 0,
     trackedSites: [],
+    hiddenSites: [],
     entries: [],
     keywords: {
       primary: [],
@@ -41,8 +44,17 @@
       }
 
       if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
-        showLayout({ rememberSite: Boolean(message.rememberSite) });
-        sendResponse({ ok: true });
+        showLayout({ rememberSite: Boolean(message.rememberSite), clearHidden: true })
+          .then(() => sendResponse({ ok: true, visible: true }))
+          .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
+      }
+
+      if (message?.type === "ARG_SCOUT_TOGGLE_LAYOUT") {
+        toggleLayout()
+          .then((visible) => sendResponse({ ok: true, visible }))
+          .catch((error) => sendResponse({ ok: false, error: error.message }));
+        return true;
       }
     });
 
@@ -55,11 +67,13 @@
       }
 
       if (changes.pendingSelection?.newValue?.text) {
-        showLayout({ rememberSite: true });
+        showLayout({ rememberSite: true, clearHidden: true });
       }
     });
 
-    checkAutoOpen();
+    if (!suppressAutoOpenOnLoad) {
+      checkAutoOpen();
+    }
   } else if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", showLayout);
   } else {
@@ -70,14 +84,37 @@
     ensureLayout();
     applyPageLayout();
     await loadState();
+    if (options.clearHidden) {
+      forgetHiddenCurrentSite();
+    }
     if (options.rememberSite) {
       rememberCurrentSite();
-      await saveState();
     }
+    await saveState();
     await consumePendingSelection();
     layout.host.hidden = false;
     syncInputsWithCurrentPage();
     renderAll();
+  }
+
+  async function toggleLayout() {
+    if (isLayoutVisible()) {
+      await loadState();
+      rememberHiddenCurrentSite();
+      await saveState();
+      hideLayout();
+      return false;
+    }
+
+    await showLayout({ rememberSite: true, clearHidden: true });
+    return true;
+  }
+
+  function hideLayout() {
+    if (layout) {
+      layout.host.hidden = true;
+    }
+    resetPageLayout();
   }
 
   function ensureLayout() {
@@ -186,6 +223,11 @@
         }
       }
     `;
+  }
+
+  function resetPageLayout() {
+    document.documentElement.classList.remove(ROOT_CLASS);
+    document.getElementById(LAYOUT_STYLE_ID)?.remove();
   }
 
   function renderAll() {
@@ -306,6 +348,7 @@
       state.targetPages = targetPages;
     }
 
+    forgetHiddenCurrentSite();
     rememberCurrentSite();
 
     const now = new Date().toISOString();
@@ -412,6 +455,7 @@
     next.targetPages = parsePositiveInt(raw.targetPages) || 0;
     next.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
     next.trackedSites = sanitizeTrackedSites(raw.trackedSites);
+    next.hiddenSites = sanitizeTrackedSites(raw.hiddenSites);
     next.entries.forEach((entry) => addTrackedSiteFromUrl(next, entry.url));
     next.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
     next.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
@@ -522,7 +566,7 @@
   async function checkAutoOpen() {
     try {
       await loadState();
-      if (isTrackedUrl(location.href)) {
+      if (isTrackedUrl(location.href) && !isHiddenUrl(location.href)) {
         await showLayout({ rememberSite: false });
       }
     } catch {
@@ -534,6 +578,16 @@
     addTrackedSiteFromUrl(state, location.href);
   }
 
+  function rememberHiddenCurrentSite() {
+    addHiddenSiteFromUrl(state, location.href);
+  }
+
+  function forgetHiddenCurrentSite() {
+    const base = normalizeSiteBase(location.href);
+    if (!base) return;
+    state.hiddenSites = state.hiddenSites.filter((site) => site !== base);
+  }
+
   function addTrackedSiteFromUrl(targetState, url) {
     const base = normalizeSiteBase(url);
     if (base && !targetState.trackedSites.includes(base)) {
@@ -541,9 +595,25 @@
     }
   }
 
+  function addHiddenSiteFromUrl(targetState, url) {
+    const base = normalizeSiteBase(url);
+    if (base && !targetState.hiddenSites.includes(base)) {
+      targetState.hiddenSites.push(base);
+    }
+  }
+
   function isTrackedUrl(url) {
     const base = normalizeSiteBase(url);
     return Boolean(base && state.trackedSites.includes(base));
+  }
+
+  function isHiddenUrl(url) {
+    const base = normalizeSiteBase(url);
+    return Boolean(base && state.hiddenSites.includes(base));
+  }
+
+  function isLayoutVisible() {
+    return Boolean(layout && !layout.host.hidden && document.documentElement.classList.contains(ROOT_CLASS));
   }
 
   function normalizeSiteBase(value) {
@@ -762,7 +832,7 @@
       }
 
       .bottom-bar {
-        left: 8px;
+        left: ${LEFT_WIDTH}px;
         right: 8px;
         bottom: 0;
         min-height: ${BOTTOM_HEIGHT}px;
@@ -890,6 +960,7 @@
         }
 
         .bottom-bar {
+          left: 170px;
           min-height: 180px;
         }
 

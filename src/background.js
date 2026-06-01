@@ -1,7 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 4;
+const STATE_VERSION = 5;
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
@@ -15,7 +15,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup?.addListener(updateBadge);
 
 chrome.action.onClicked.addListener(async (tab) => {
-  await showLayout(tab, { rememberSite: true });
+  await toggleLayout(tab);
   await updateBadge();
 });
 
@@ -23,7 +23,7 @@ chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete" || !isSavableTab(tab)) return;
 
   const state = await loadState();
-  if (isTrackedUrl(tab.url, state)) {
+  if (isTrackedUrl(tab.url, state) && !isHiddenUrl(tab.url, state)) {
     await showLayout(tab, { rememberSite: false });
   }
 });
@@ -67,6 +67,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
+async function toggleLayout(tab) {
+  if (!isSavableTab(tab) || tab.id == null) return;
+
+  const message = { type: "ARG_SCOUT_TOGGLE_LAYOUT" };
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, message);
+  } catch {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          globalThis.__ARG_SCOUT_SUPPRESS_AUTO_OPEN_ON_LOAD__ = true;
+        }
+      });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["src/content.js"]
+      });
+      await chrome.tabs.sendMessage(tab.id, message);
+    } catch {
+      // The current page may disallow extension scripts.
+    }
+  }
+}
+
 async function showLayout(tab, options = {}) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
@@ -106,6 +132,7 @@ function sanitizeState(raw) {
     sessionTitle: "ARG探索メモ",
     targetPages: 0,
     trackedSites: [],
+    hiddenSites: [],
     entries: [],
     keywords: {
       primary: [],
@@ -123,6 +150,7 @@ function sanitizeState(raw) {
   state.targetPages = parsePositiveInt(raw.targetPages) || 0;
   state.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
   state.trackedSites = sanitizeTrackedSites(raw.trackedSites);
+  state.hiddenSites = sanitizeTrackedSites(raw.hiddenSites);
   state.entries.forEach((entry) => addTrackedSiteFromUrl(state, entry.url));
   state.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
   state.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
@@ -193,6 +221,11 @@ function addTrackedSiteFromUrl(state, url) {
 function isTrackedUrl(url, state) {
   const base = normalizeSiteBase(url);
   return Boolean(base && state.trackedSites.includes(base));
+}
+
+function isHiddenUrl(url, state) {
+  const base = normalizeSiteBase(url);
+  return Boolean(base && state.hiddenSites.includes(base));
 }
 
 async function updateBadge() {
