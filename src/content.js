@@ -161,10 +161,13 @@
             <div class="brand-row">
               <img class="brand-icon" src="${getIconUrl()}" alt="ARG探索ツール">
               <select id="sessionSelect" title="ARGを切り替え"></select>
-              <button id="newArgButton" class="new-arg-button" type="button" title="現在のサイトを新しいARGとして追加">+ ARG</button>
             </div>
             <input id="sessionTitleInput" class="session-title-input" type="text" placeholder="ARGタイトル">
-            <small id="sessionSite" class="session-site"></small>
+            <div class="session-actions">
+              <small id="sessionSite" class="session-site"></small>
+              <button id="newArgButton" class="new-arg-button" type="button" title="現在のサイトを新しいARGとして追加">+ ARG</button>
+              <button id="deleteArgButton" class="delete-arg-button" type="button" title="現在のARGを削除">削除</button>
+            </div>
           </header>
           <div class="table-head">
             <span>#</span>
@@ -220,6 +223,7 @@
     els.pageForm.addEventListener("submit", saveCurrentPage);
     els.stashKeywordButton.addEventListener("click", stashCurrentKeyword);
     els.newArgButton.addEventListener("click", createArgSession);
+    els.deleteArgButton.addEventListener("click", deleteCurrentArgSession);
     els.sessionSelect.addEventListener("change", switchSession);
     els.sessionTitleInput.addEventListener("change", updateSessionTitle);
     els.targetPagesInput.addEventListener("change", updateTargetPages);
@@ -303,10 +307,11 @@
       item.className = "page-row";
       item.classList.toggle("current", page.url === location.href);
 
-      const button = document.createElement("button");
-      button.type = "button";
-      button.title = `${page.keyword || page.clue}\n${page.title}\n${page.url}`;
-      button.innerHTML = `
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "page-open";
+      openButton.title = `${page.keyword || page.clue}\n${page.title}\n${page.url}`;
+      openButton.innerHTML = `
         <span class="page-no">${String(page.pageNo).padStart(2, "0")}</span>
         <span class="page-main">
           <span class="page-key"></span>
@@ -314,13 +319,20 @@
         </span>
       `;
 
-      button.querySelector(".page-key").textContent = page.keyword || page.clue || page.title || "Unspecified";
-      button.querySelector(".page-url").textContent = page.url;
-      button.addEventListener("click", () => {
+      openButton.querySelector(".page-key").textContent = page.keyword || page.clue || page.title || "Unspecified";
+      openButton.querySelector(".page-url").textContent = page.url;
+      openButton.addEventListener("click", () => {
         location.href = page.url;
       });
 
-      item.append(button);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "page-delete";
+      deleteButton.title = "このページを削除";
+      deleteButton.textContent = "×";
+      deleteButton.addEventListener("click", () => deleteSavedPage(page.id));
+
+      item.append(openButton, deleteButton);
       els.pageList.append(item);
     });
   }
@@ -457,6 +469,29 @@
     setSaveStatus("新しいARGを追加しました", false);
   }
 
+  async function deleteCurrentArgSession() {
+    const title = state.sessionTitle || DEFAULT_SESSION_TITLE;
+    if (!globalThis.confirm(`「${title}」を削除しますか？\n登録したページとキーワードも削除されます。`)) {
+      return;
+    }
+
+    await loadStore();
+    const nextSessions = store.sessions.filter((session) => session.id !== state.id);
+    const base = normalizeSiteBase(location.href);
+    const nextSession = nextSessions.find((session) => session.trackedSites.includes(base))
+      || nextSessions[0]
+      || createSession({ trackCurrent: true });
+
+    store.sessions = nextSessions.includes(nextSession) ? nextSessions : [nextSession];
+    store.activeSessionId = nextSession.id;
+    state = nextSession;
+    await saveState();
+    await requestBadgeRefresh();
+    syncInputsWithCurrentPage();
+    renderAll();
+    setSaveStatus("ARGを削除しました", false);
+  }
+
   async function switchSession() {
     await loadStore();
     const selected = store.sessions.find((session) => session.id === els.sessionSelect.value);
@@ -478,6 +513,15 @@
     await saveState();
     renderSession();
     setSaveStatus("タイトルを保存しました", false);
+  }
+
+  async function deleteSavedPage(id) {
+    state.entries = state.entries.filter((entry) => entry.id !== id);
+    await saveState();
+    await requestBadgeRefresh();
+    syncInputsWithCurrentPage();
+    renderAll();
+    setSaveStatus("ページを削除しました", false);
   }
 
   function allowDrop(event) {
@@ -882,7 +926,7 @@
         bottom: ${BOTTOM_HEIGHT + 8}px;
         width: 188px;
         display: grid;
-        grid-template-rows: 112px auto minmax(0, 1fr) 58px;
+        grid-template-rows: 128px auto minmax(0, 1fr) 58px;
         overflow: hidden;
         border-radius: 6px;
       }
@@ -898,7 +942,7 @@
 
       .brand-row {
         display: grid;
-        grid-template-columns: 28px minmax(0, 1fr) auto;
+        grid-template-columns: 28px minmax(0, 1fr);
         align-items: center;
         gap: 7px;
         min-width: 0;
@@ -919,7 +963,16 @@
         white-space: nowrap;
       }
 
-      .new-arg-button {
+      .session-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .new-arg-button,
+      .delete-arg-button {
         min-height: 25px;
         border: 1px solid rgba(25, 210, 160, 0.76);
         border-radius: 5px;
@@ -929,6 +982,11 @@
         font-weight: 900;
         padding: 4px 6px;
         cursor: pointer;
+      }
+
+      .delete-arg-button {
+        border-color: rgba(255, 111, 145, 0.72);
+        background: rgba(128, 38, 67, 0.86);
       }
 
       .session-title-input,
@@ -973,13 +1031,18 @@
         padding: 48px 18px;
       }
 
-      .page-row button {
+      .page-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 30px;
+        border-bottom: 1px solid rgba(72, 95, 127, 0.35);
+      }
+
+      .page-open {
         display: grid;
         grid-template-columns: 36px minmax(0, 1fr);
         width: 100%;
         min-height: 54px;
         border: 0;
-        border-bottom: 1px solid rgba(72, 95, 127, 0.35);
         background: transparent;
         color: inherit;
         padding: 8px 10px;
@@ -987,9 +1050,24 @@
         cursor: pointer;
       }
 
-      .page-row button:hover,
-      .page-row.current button {
+      .page-open:hover,
+      .page-row.current .page-open {
         background: rgba(19, 209, 156, 0.09);
+      }
+
+      .page-delete {
+        border: 0;
+        border-left: 1px solid rgba(72, 95, 127, 0.28);
+        background: transparent;
+        color: #7c8ca0;
+        font-size: 16px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .page-delete:hover {
+        background: rgba(255, 111, 145, 0.13);
+        color: #ff8baa;
       }
 
       .page-no {
