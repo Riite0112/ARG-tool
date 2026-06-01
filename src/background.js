@@ -1,6 +1,6 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
-const BUTTON_SOURCE = "extension-button";
+const MANUAL_SOURCE = "manual-entry";
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
@@ -14,9 +14,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup?.addListener(updateBadge);
 
 chrome.action.onClicked.addListener(async (tab) => {
-  const entry = await addPageFromAction(tab);
+  await showLayout(tab);
   await updateBadge();
-  await showOverlay(tab, entry?.id || null);
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -37,29 +36,31 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   });
 
-  await showOverlay(tab, null);
+  await showLayout(tab);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== "ARG_SCOUT_ADD_CURRENT_PAGE") return;
+  if (message?.type === "ARG_SCOUT_REFRESH_BADGE") {
+    updateBadge()
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
 
-  addPageFromAction(message.tab || sender.tab)
-    .then(async (entry) => {
-      await updateBadge();
-      sendResponse({ ok: true, entry });
-    })
-    .catch((error) => sendResponse({ ok: false, error: error.message }));
+  if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
+    showLayout(message.tab || sender.tab)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
 
-  return true;
+  return false;
 });
 
-async function showOverlay(tab, selectedPageId) {
+async function showLayout(tab) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
-  const message = {
-    type: "ARG_SCOUT_SHOW_OVERLAY",
-    selectedPageId
-  };
+  const message = { type: "ARG_SCOUT_SHOW_LAYOUT" };
 
   try {
     await chrome.tabs.sendMessage(tab.id, message);
@@ -76,40 +77,6 @@ async function showOverlay(tab, selectedPageId) {
   }
 }
 
-async function addPageFromAction(tab) {
-  if (!isSavableTab(tab)) return null;
-
-  const state = await loadState();
-  const now = new Date().toISOString();
-  const existing = state.entries.find((entry) => entry.source === BUTTON_SOURCE && entry.url === tab.url);
-
-  if (existing) {
-    existing.clue = tab.title || existing.clue || "無題のページ";
-    existing.title = tab.title || existing.title || "無題のページ";
-    existing.updatedAt = now;
-    await saveState(state);
-    return existing;
-  }
-
-  const entry = {
-    id: crypto.randomUUID(),
-    pageNo: suggestNextButtonPageNo(state.entries),
-    clue: tab.title || "無題のページ",
-    title: tab.title || "無題のページ",
-    url: tab.url,
-    notes: "",
-    color: "#5ff0b1",
-    status: "open",
-    source: BUTTON_SOURCE,
-    createdAt: now,
-    updatedAt: now
-  };
-
-  state.entries.push(entry);
-  await saveState(state);
-  return entry;
-}
-
 function isSavableTab(tab) {
   if (!tab?.url) return false;
   return !/^(chrome|chrome-extension|edge|about):/i.test(tab.url);
@@ -120,15 +87,11 @@ async function loadState() {
   return sanitizeState(result[STORAGE_KEY]);
 }
 
-async function saveState(state) {
-  state.updatedAt = new Date().toISOString();
-  await chrome.storage.local.set({ [STORAGE_KEY]: state });
-}
-
 function sanitizeState(raw) {
   const state = {
-    version: 2,
+    version: 3,
     sessionTitle: "ARG探索メモ",
+    targetPages: 0,
     entries: [],
     keywords: {
       primary: [],
@@ -139,10 +102,11 @@ function sanitizeState(raw) {
 
   if (!raw || typeof raw !== "object") return state;
 
-  state.version = 2;
+  state.version = 3;
   state.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
     ? raw.sessionTitle
     : state.sessionTitle;
+  state.targetPages = parsePositiveInt(raw.targetPages) || 0;
   state.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
   state.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
   state.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
@@ -156,14 +120,15 @@ function sanitizeEntry(entry) {
 
   return {
     id: String(entry.id || crypto.randomUUID()),
-    pageNo: Number.isInteger(Number(entry.pageNo)) && Number(entry.pageNo) > 0 ? Number(entry.pageNo) : 1,
-    clue: String(entry.clue || title),
+    pageNo: parsePositiveInt(entry.pageNo) || 1,
+    clue: String(entry.clue || entry.keyword || title),
     title,
+    keyword: String(entry.keyword || entry.clue || "").trim(),
     url: String(entry.url || ""),
     notes: String(entry.notes || ""),
     color: /^#[0-9a-f]{6}$/i.test(String(entry.color || "")) ? entry.color : "#5ff0b1",
     status: ["open", "checked", "solved"].includes(entry.status) ? entry.status : "open",
-    source: entry.source === BUTTON_SOURCE ? BUTTON_SOURCE : "manual",
+    source: entry.source === MANUAL_SOURCE ? MANUAL_SOURCE : MANUAL_SOURCE,
     createdAt: entry.createdAt || new Date().toISOString(),
     updatedAt: entry.updatedAt || new Date().toISOString()
   };
@@ -180,15 +145,14 @@ function sanitizeKeywordArray(value) {
     .filter((item) => item.text);
 }
 
-function suggestNextButtonPageNo(entries) {
-  return entries
-    .filter((entry) => entry.source === BUTTON_SOURCE)
-    .reduce((highest, entry) => Math.max(highest, Number(entry.pageNo) || 0), 0) + 1;
+function parsePositiveInt(value) {
+  const number = Number.parseInt(value, 10);
+  return Number.isInteger(number) && number > 0 ? number : null;
 }
 
 async function updateBadge() {
   const state = await loadState();
-  const count = state.entries.filter((entry) => entry.source === BUTTON_SOURCE).length;
+  const count = state.entries.length;
   await chrome.action.setBadgeBackgroundColor({ color: "#1f7a5a" });
   await chrome.action.setBadgeText({ text: count ? String(count) : "" });
 }
