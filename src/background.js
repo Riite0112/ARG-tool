@@ -14,15 +14,9 @@ chrome.runtime.onInstalled.addListener(async () => {
 chrome.runtime.onStartup?.addListener(updateBadge);
 
 chrome.action.onClicked.addListener(async (tab) => {
-  const openPanel = tab?.windowId != null
-    ? chrome.sidePanel.open({ windowId: tab.windowId })
-    : Promise.resolve();
-  if (tab?.windowId != null) {
-    await openPanel;
-  }
-
-  await addPageFromAction(tab);
+  const entry = await addPageFromAction(tab);
   await updateBadge();
+  await showOverlay(tab, entry?.id || null);
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -43,9 +37,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     }
   });
 
-  if (tab?.windowId != null) {
-    await chrome.sidePanel.open({ windowId: tab.windowId });
-  }
+  await showOverlay(tab, null);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -60,6 +52,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true;
 });
+
+async function showOverlay(tab, selectedPageId) {
+  if (!isSavableTab(tab) || tab.id == null) return;
+
+  const message = {
+    type: "ARG_SCOUT_SHOW_OVERLAY",
+    selectedPageId
+  };
+
+  try {
+    await chrome.tabs.sendMessage(tab.id, message);
+  } catch {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["src/content.js"]
+      });
+      await chrome.tabs.sendMessage(tab.id, message);
+    } catch {
+      // The current page may disallow extension scripts.
+    }
+  }
+}
 
 async function addPageFromAction(tab) {
   if (!isSavableTab(tab)) return null;
