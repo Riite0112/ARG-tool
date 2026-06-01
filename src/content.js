@@ -9,13 +9,21 @@
   const DEFAULT_SESSION_TITLE = "ARG探索メモ";
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
   const ROOT_CLASS = "arg-scout-layout-active";
-  const STATE_VERSION = 5;
+  const STATE_VERSION = 6;
   const LEFT_WIDTH = 204;
   const BOTTOM_HEIGHT = 150;
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
 
+  const initialStore = {
+    version: STATE_VERSION,
+    activeSessionId: null,
+    sessions: [],
+    updatedAt: null
+  };
+
   const initialState = {
     version: STATE_VERSION,
+    id: "",
     sessionTitle: DEFAULT_SESSION_TITLE,
     targetPages: 0,
     trackedSites: [],
@@ -25,9 +33,11 @@
       primary: [],
       reserve: []
     },
+    createdAt: null,
     updatedAt: null
   };
 
+  let store = structuredClone(initialStore);
   let state = structuredClone(initialState);
   let layout = null;
   let els = {};
@@ -71,7 +81,8 @@
       if (area !== "local" || !layout) return;
 
       if (changes[STORAGE_KEY]?.newValue) {
-        state = sanitizeState(changes[STORAGE_KEY].newValue);
+        store = sanitizeStore(changes[STORAGE_KEY].newValue);
+        state = resolveSessionForCurrentUrl(store, { create: false }) || state;
         if (isHiddenUrl(location.href)) {
           hideLayout();
           return;
@@ -96,7 +107,7 @@
   async function showLayout(options = {}) {
     ensureLayout();
     applyPageLayout();
-    await loadState();
+    await loadState({ create: true });
     if (options.clearHidden) {
       forgetHiddenCurrentSite();
     }
@@ -148,6 +159,11 @@
         <aside class="side-panel">
           <header class="side-brand">
             <img class="brand-icon" src="${getIconUrl()}" alt="ARG探索ツール">
+            <div class="session-meta">
+              <strong id="sessionTitle">ARG探索メモ</strong>
+              <small id="sessionSite"></small>
+            </div>
+            <button id="newArgButton" class="new-arg-button" type="button" title="現在のサイトを新しいARGとして追加">+ ARG</button>
           </header>
           <div class="table-head">
             <span>#</span>
@@ -202,6 +218,7 @@
 
     els.pageForm.addEventListener("submit", saveCurrentPage);
     els.stashKeywordButton.addEventListener("click", stashCurrentKeyword);
+    els.newArgButton.addEventListener("click", createArgSession);
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
@@ -247,9 +264,15 @@
 
   function renderAll() {
     if (!layout) return;
+    renderSession();
     renderPages();
     renderKeywords();
     renderProgress();
+  }
+
+  function renderSession() {
+    els.sessionTitle.textContent = state.sessionTitle || DEFAULT_SESSION_TITLE;
+    els.sessionSite.textContent = normalizeSiteBase(location.href).replace(/^https?:\/\//, "");
   }
 
   function renderPages() {
@@ -409,6 +432,18 @@
     renderKeywords();
   }
 
+  async function createArgSession() {
+    await loadStore();
+    const session = createSession({ trackCurrent: true });
+    store.sessions.push(session);
+    store.activeSessionId = session.id;
+    state = session;
+    await saveState();
+    syncInputsWithCurrentPage();
+    renderAll();
+    setSaveStatus("新しいARGを追加しました", false);
+  }
+
   function allowDrop(event) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -424,14 +459,28 @@
     renderKeywords();
   }
 
-  async function loadState() {
+  async function loadState(options = {}) {
     if (!canUseExtensionApi) {
-      state = sanitizeState(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
+      store = sanitizeStore(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
+      state = resolveSessionForCurrentUrl(store, { create: options.create }) || createSession({ trackCurrent: false });
+      return Boolean(store.sessions.length);
+    }
+
+    const result = await chrome.storage.local.get([STORAGE_KEY]);
+    store = sanitizeStore(result[STORAGE_KEY]);
+    const session = resolveSessionForCurrentUrl(store, { create: options.create });
+    state = session || createSession({ trackCurrent: false });
+    return Boolean(session);
+  }
+
+  async function loadStore() {
+    if (!canUseExtensionApi) {
+      store = sanitizeStore(JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"));
       return;
     }
 
     const result = await chrome.storage.local.get([STORAGE_KEY]);
-    state = sanitizeState(result[STORAGE_KEY]);
+    store = sanitizeStore(result[STORAGE_KEY]);
   }
 
   async function consumePendingSelection() {
@@ -450,23 +499,49 @@
   async function saveState() {
     state.version = STATE_VERSION;
     state.updatedAt = new Date().toISOString();
+    upsertCurrentSession();
+    store.version = STATE_VERSION;
+    store.updatedAt = state.updatedAt;
 
     if (!canUseExtensionApi) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
       return;
     }
 
-    await chrome.storage.local.set({ [STORAGE_KEY]: state });
+    await chrome.storage.local.set({ [STORAGE_KEY]: store });
   }
 
-  function sanitizeState(raw) {
-    const next = structuredClone(initialState);
+  function sanitizeStore(raw) {
+    const next = structuredClone(initialStore);
+    if (!raw || typeof raw !== "object") return next;
+
+    if (Array.isArray(raw.sessions)) {
+      next.sessions = raw.sessions.map(sanitizeSession).filter(Boolean);
+      next.activeSessionId = next.sessions.some((session) => session.id === raw.activeSessionId)
+        ? raw.activeSessionId
+        : next.sessions[0]?.id || null;
+      next.updatedAt = raw.updatedAt || null;
+      return next;
+    }
+
+    const legacySession = sanitizeSession(raw);
+    if (legacySession && hasSessionData(legacySession)) {
+      next.sessions = [legacySession];
+      next.activeSessionId = legacySession.id;
+      next.updatedAt = legacySession.updatedAt;
+    }
+    return next;
+  }
+
+  function sanitizeSession(raw) {
+    const next = createSession({ trackCurrent: false });
     if (!raw || typeof raw !== "object") return next;
 
     next.version = STATE_VERSION;
+    next.id = String(raw.id || crypto.randomUUID());
     next.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
       ? raw.sessionTitle
-      : DEFAULT_SESSION_TITLE;
+      : defaultSessionTitle(raw.trackedSites?.[0] || raw.entries?.[0]?.url || location.href);
     next.targetPages = parsePositiveInt(raw.targetPages) || 0;
     next.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
     next.trackedSites = sanitizeTrackedSites(raw.trackedSites);
@@ -474,6 +549,7 @@
     next.entries.forEach((entry) => addTrackedSiteFromUrl(next, entry.url));
     next.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
     next.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
+    next.createdAt = raw.createdAt || next.createdAt;
     next.updatedAt = raw.updatedAt || null;
     return next;
   }
@@ -513,6 +589,74 @@
   function sanitizeTrackedSites(value) {
     if (!Array.isArray(value)) return [];
     return [...new Set(value.map(normalizeSiteBase).filter(Boolean))];
+  }
+
+  function createSession(options = {}) {
+    const now = new Date().toISOString();
+    const session = structuredClone(initialState);
+    session.id = crypto.randomUUID();
+    session.sessionTitle = options.title || defaultSessionTitle(location.href);
+    session.createdAt = now;
+    session.updatedAt = null;
+    if (options.trackCurrent !== false) {
+      addTrackedSiteFromUrl(session, location.href);
+    }
+    return session;
+  }
+
+  function resolveSessionForCurrentUrl(targetStore, options = {}) {
+    const base = normalizeSiteBase(location.href);
+    const active = targetStore.sessions.find((session) => session.id === targetStore.activeSessionId);
+
+    if (active && (!base || active.trackedSites.includes(base))) {
+      return active;
+    }
+
+    const matched = base
+      ? targetStore.sessions.find((session) => session.trackedSites.includes(base))
+      : null;
+    if (matched) {
+      targetStore.activeSessionId = matched.id;
+      return matched;
+    }
+
+    if (!options.create) return null;
+
+    const session = createSession({ trackCurrent: true });
+    targetStore.sessions.push(session);
+    targetStore.activeSessionId = session.id;
+    return session;
+  }
+
+  function upsertCurrentSession() {
+    const index = store.sessions.findIndex((session) => session.id === state.id);
+    if (index >= 0) {
+      store.sessions[index] = state;
+    } else {
+      store.sessions.push(state);
+    }
+    store.activeSessionId = state.id;
+  }
+
+  function hasSessionData(session) {
+    return Boolean(
+      session.entries.length ||
+      session.keywords.primary.length ||
+      session.keywords.reserve.length ||
+      session.trackedSites.length ||
+      session.targetPages
+    );
+  }
+
+  function defaultSessionTitle(url) {
+    const base = normalizeSiteBase(url);
+    if (!base) return DEFAULT_SESSION_TITLE;
+
+    try {
+      return `${new URL(base).hostname} ARG`;
+    } catch {
+      return DEFAULT_SESSION_TITLE;
+    }
   }
 
   function savedPages() {
@@ -580,8 +724,8 @@
 
   async function checkAutoOpen() {
     try {
-      await loadState();
-      if (isTrackedUrl(location.href) && !isHiddenUrl(location.href)) {
+      const hasSession = await loadState({ create: false });
+      if (hasSession && isTrackedUrl(location.href) && !isHiddenUrl(location.href)) {
         await showLayout({ rememberSite: false });
       }
     } catch {
@@ -710,15 +854,55 @@
       .side-brand {
         display: flex;
         align-items: center;
-        padding: 0 18px;
+        gap: 8px;
+        min-width: 0;
+        padding: 0 10px;
         border-bottom: 1px solid rgba(72, 95, 127, 0.8);
       }
 
       .brand-icon {
-        width: 31px;
-        height: 31px;
+        width: 28px;
+        height: 28px;
+        flex: 0 0 auto;
         border-radius: 7px;
         object-fit: contain;
+      }
+
+      .session-meta {
+        display: grid;
+        min-width: 0;
+        gap: 1px;
+      }
+
+      .session-meta strong,
+      .session-meta small {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .session-meta strong {
+        color: #eff7f4;
+        font-size: 11px;
+        font-weight: 900;
+      }
+
+      .session-meta small {
+        color: #7c8ca0;
+        font-size: 9px;
+      }
+
+      .new-arg-button {
+        flex: 0 0 auto;
+        min-height: 25px;
+        border: 1px solid rgba(25, 210, 160, 0.76);
+        border-radius: 5px;
+        background: rgba(18, 146, 113, 0.86);
+        color: #f7fffb;
+        font-size: 10px;
+        font-weight: 900;
+        padding: 4px 6px;
+        cursor: pointer;
       }
 
       .table-head {

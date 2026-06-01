@@ -1,7 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 5;
+const STATE_VERSION = 6;
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
@@ -22,8 +22,9 @@ chrome.action.onClicked.addListener(async (tab) => {
 chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete" || !isSavableTab(tab)) return;
 
-  const state = await loadState();
-  if (isTrackedUrl(tab.url, state) && !isHiddenUrl(tab.url, state)) {
+  const store = await loadState();
+  const session = resolveSessionForUrl(store, tab.url, { create: false });
+  if (session && isTrackedUrl(tab.url, session) && !isHiddenUrl(tab.url, session)) {
     await showLayout(tab, { rememberSite: false });
   }
 });
@@ -70,21 +71,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function toggleLayout(tab) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
-  const state = await loadState();
-  const isTracked = isTrackedUrl(tab.url, state);
-  const isHidden = isHiddenUrl(tab.url, state);
+  const store = await loadState();
+  let session = resolveSessionForUrl(store, tab.url, { create: false });
+  const isTracked = session && isTrackedUrl(tab.url, session);
+  const isHidden = session && isHiddenUrl(tab.url, session);
 
   if (isTracked && !isHidden) {
-    addHiddenSiteFromUrl(state, tab.url);
-    await saveState(state);
+    addHiddenSiteFromUrl(session, tab.url);
+    store.activeSessionId = session.id;
+    await saveState(store);
     await sendLayoutMessage(tab, { type: "ARG_SCOUT_HIDE_LAYOUT" });
     await forceHideLayout(tab);
     return;
   }
 
-  addTrackedSiteFromUrl(state, tab.url);
-  removeHiddenSiteFromUrl(state, tab.url);
-  await saveState(state);
+  if (!session) {
+    session = createSession(tab);
+    store.sessions.push(session);
+  }
+  addTrackedSiteFromUrl(session, tab.url);
+  removeHiddenSiteFromUrl(session, tab.url);
+  store.activeSessionId = session.id;
+  await saveState(store);
   await forceRevealLayoutHost(tab);
   await sendLayoutMessage(tab, {
     type: "ARG_SCOUT_SHOW_LAYOUT",
@@ -161,6 +169,19 @@ async function forceRevealLayoutHost(tab) {
 async function showLayout(tab, options = {}) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
+  if (options.rememberSite) {
+    const store = await loadState();
+    let session = resolveSessionForUrl(store, tab.url, { create: false });
+    if (!session) {
+      session = createSession(tab);
+      store.sessions.push(session);
+    }
+    addTrackedSiteFromUrl(session, tab.url);
+    removeHiddenSiteFromUrl(session, tab.url);
+    store.activeSessionId = session.id;
+    await saveState(store);
+  }
+
   const message = {
     type: "ARG_SCOUT_SHOW_LAYOUT",
     rememberSite: Boolean(options.rememberSite)
@@ -192,6 +213,35 @@ async function saveState(state) {
 function sanitizeState(raw) {
   const state = {
     version: STATE_VERSION,
+    activeSessionId: null,
+    sessions: [],
+    updatedAt: null
+  };
+
+  if (!raw || typeof raw !== "object") return state;
+
+  if (Array.isArray(raw.sessions)) {
+    state.sessions = raw.sessions.map(sanitizeSession).filter(Boolean);
+    state.activeSessionId = state.sessions.some((session) => session.id === raw.activeSessionId)
+      ? raw.activeSessionId
+      : state.sessions[0]?.id || null;
+    state.updatedAt = raw.updatedAt || null;
+    return state;
+  }
+
+  const legacySession = sanitizeSession(raw);
+  if (legacySession && hasSessionData(legacySession)) {
+    state.sessions = [legacySession];
+    state.activeSessionId = legacySession.id;
+    state.updatedAt = legacySession.updatedAt;
+  }
+  return state;
+}
+
+function sanitizeSession(raw) {
+  const state = {
+    version: STATE_VERSION,
+    id: String(raw?.id || crypto.randomUUID()),
     sessionTitle: "ARG探索メモ",
     targetPages: 0,
     trackedSites: [],
@@ -201,6 +251,7 @@ function sanitizeState(raw) {
       primary: [],
       reserve: []
     },
+    createdAt: raw?.createdAt || new Date().toISOString(),
     updatedAt: null
   };
 
@@ -219,6 +270,63 @@ function sanitizeState(raw) {
   state.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
   state.updatedAt = raw.updatedAt || null;
   return state;
+}
+
+function hasSessionData(session) {
+  return Boolean(
+    session.entries.length ||
+    session.keywords.primary.length ||
+    session.keywords.reserve.length ||
+    session.trackedSites.length ||
+    session.targetPages
+  );
+}
+
+function createSession(tab) {
+  const now = new Date().toISOString();
+  const session = sanitizeSession({
+    id: crypto.randomUUID(),
+    sessionTitle: defaultSessionTitle(tab?.url),
+    createdAt: now,
+    updatedAt: null
+  });
+  addTrackedSiteFromUrl(session, tab?.url);
+  return session;
+}
+
+function resolveSessionForUrl(store, url, options = {}) {
+  const base = normalizeSiteBase(url);
+  const active = store.sessions.find((session) => session.id === store.activeSessionId);
+
+  if (active && (!base || active.trackedSites.includes(base))) {
+    return active;
+  }
+
+  const matched = base
+    ? store.sessions.find((session) => session.trackedSites.includes(base))
+    : null;
+  if (matched) {
+    store.activeSessionId = matched.id;
+    return matched;
+  }
+
+  if (!options.create) return null;
+
+  const session = createSession({ url });
+  store.sessions.push(session);
+  store.activeSessionId = session.id;
+  return session;
+}
+
+function defaultSessionTitle(url) {
+  const base = normalizeSiteBase(url);
+  if (!base) return "ARG探索メモ";
+
+  try {
+    return `${new URL(base).hostname} ARG`;
+  } catch {
+    return "ARG探索メモ";
+  }
 }
 
 function sanitizeTrackedSites(value) {
@@ -305,8 +413,9 @@ function isHiddenUrl(url, state) {
 }
 
 async function updateBadge() {
-  const state = await loadState();
-  const count = state.entries.length;
+  const store = await loadState();
+  const active = store.sessions.find((session) => session.id === store.activeSessionId);
+  const count = active?.entries.length || 0;
   await chrome.action.setBadgeBackgroundColor({ color: "#1f7a5a" });
   await chrome.action.setBadgeText({ text: count ? String(count) : "" });
 }
