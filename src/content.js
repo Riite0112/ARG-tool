@@ -293,6 +293,7 @@
   function renderPages() {
     const pages = savedPages();
     els.pageList.textContent = "";
+    let currentItem = null;
 
     if (!pages.length) {
       const empty = document.createElement("li");
@@ -306,6 +307,9 @@
       const item = document.createElement("li");
       item.className = "page-row";
       item.classList.toggle("current", page.url === location.href);
+      if (page.url === location.href) {
+        currentItem = item;
+      }
 
       const openButton = document.createElement("button");
       openButton.type = "button";
@@ -335,6 +339,15 @@
       item.append(openButton, deleteButton);
       els.pageList.append(item);
     });
+
+    if (currentItem) {
+      requestAnimationFrame(() => {
+        currentItem.scrollIntoView({
+          block: "center",
+          inline: "nearest"
+        });
+      });
+    }
   }
 
   function renderKeywords() {
