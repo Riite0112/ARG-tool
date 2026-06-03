@@ -9,9 +9,15 @@
   const DEFAULT_SESSION_TITLE = "ARG探索メモ";
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
   const ROOT_CLASS = "arg-scout-layout-active";
+  const FIXED_OFFSET_ATTR = "data-arg-scout-fixed-offset";
+  const FIXED_BOTTOM_ATTR = "data-arg-scout-fixed-bottom";
+  const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
   const STATE_VERSION = 7;
   const LEFT_WIDTH = 204;
   const BOTTOM_HEIGHT = 150;
+  const COMPACT_LEFT_WIDTH = 170;
+  const COMPACT_BOTTOM_HEIGHT = 180;
+  const PROTECTED_TAGS = new Set(["script", "style", "link", "meta", "title", "noscript"]);
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
 
   const initialStore = {
@@ -41,6 +47,8 @@
   let state = structuredClone(initialState);
   let layout = null;
   let els = {};
+  let fixedElementObserver = null;
+  let fixedElementFrame = 0;
 
   if (canUseExtensionApi) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -118,6 +126,8 @@
     await consumePendingSelection();
     layout.host.hidden = false;
     layout.host.style.display = "";
+    scheduleProtectFixedElements();
+    window.setTimeout(scheduleProtectFixedElements, 350);
     syncInputsWithCurrentPage();
     renderAll();
   }
@@ -188,6 +198,7 @@
             <span>KEYWORDS</span>
             <strong id="keywordCount">0</strong>
             <em id="saveStatus" class="save-status"></em>
+            <button id="helpButton" class="help-button" type="button" title="説明書" aria-expanded="false">?</button>
           </header>
           <form id="pageForm" class="page-form">
             <label>
@@ -206,6 +217,24 @@
             <button id="stashKeywordButton" type="button">一時保存</button>
           </form>
           <ul id="keywordList" class="keyword-list"></ul>
+        </section>
+
+        <section id="helpPanel" class="help-panel" hidden aria-label="説明書">
+          <header class="help-head">
+            <strong>説明書</strong>
+            <button id="closeHelpButton" class="help-close" type="button" title="閉じる">×</button>
+          </header>
+          <div class="help-body">
+            <p>ARGごとにページ番号、到達キーワード、URLを手動で記録できます。</p>
+            <ul>
+              <li>右上の拡張機能アイコンで表示/非表示を切り替えます。</li>
+              <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
+              <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
+              <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
+              <li>下のキーワードはクリックでコピー、<strong>×</strong> で削除します。</li>
+              <li>ページ右下のファイル番号などは、下バーに隠れないよう自動で上へ退避します。</li>
+            </ul>
+          </div>
         </section>
       </div>
     `;
@@ -229,6 +258,8 @@
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
+    els.helpButton.addEventListener("click", toggleHelpPanel);
+    els.closeHelpButton.addEventListener("click", closeHelpPanel);
 
     layout.shadow.querySelector(".side-panel").addEventListener("dragover", allowDrop);
     layout.shadow.querySelector(".side-panel").addEventListener("drop", handleKeywordDrop);
@@ -256,17 +287,129 @@
       }
       @media (max-width: 760px) {
         html.${ROOT_CLASS} body {
-          margin-left: 170px !important;
-          max-width: calc(100vw - 170px) !important;
-          margin-bottom: 180px !important;
+          margin-left: ${COMPACT_LEFT_WIDTH}px !important;
+          max-width: calc(100vw - ${COMPACT_LEFT_WIDTH}px) !important;
+          margin-bottom: ${COMPACT_BOTTOM_HEIGHT}px !important;
         }
       }
     `;
+    startFixedElementProtection();
+    scheduleProtectFixedElements();
   }
 
   function resetPageLayout() {
+    stopFixedElementProtection();
+    restorePageFixedElements();
     document.documentElement.classList.remove(ROOT_CLASS);
     document.getElementById(LAYOUT_STYLE_ID)?.remove();
+  }
+
+  function startFixedElementProtection() {
+    window.removeEventListener("resize", scheduleProtectFixedElements);
+    window.addEventListener("resize", scheduleProtectFixedElements, { passive: true });
+
+    if (!document.body || fixedElementObserver) return;
+
+    fixedElementObserver = new MutationObserver(scheduleProtectFixedElements);
+    fixedElementObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  function stopFixedElementProtection() {
+    window.removeEventListener("resize", scheduleProtectFixedElements);
+    if (fixedElementFrame) {
+      cancelAnimationFrame(fixedElementFrame);
+      fixedElementFrame = 0;
+    }
+    fixedElementObserver?.disconnect();
+    fixedElementObserver = null;
+  }
+
+  function scheduleProtectFixedElements() {
+    if (fixedElementFrame) return;
+    fixedElementFrame = requestAnimationFrame(() => {
+      fixedElementFrame = 0;
+      protectFixedPageElements();
+    });
+  }
+
+  function protectFixedPageElements() {
+    if (!isLayoutVisible() || !document.body) return;
+
+    restorePageFixedElements();
+
+    const metrics = currentLayoutMetrics();
+    const offset = metrics.bottom + 12;
+    const candidates = [...document.body.querySelectorAll("*")];
+
+    candidates.forEach((node) => {
+      if (!shouldOffsetFixedElement(node, metrics)) return;
+      offsetFixedElement(node, offset);
+    });
+  }
+
+  function restorePageFixedElements() {
+    document.querySelectorAll(`[${FIXED_OFFSET_ATTR}]`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+
+      if (node.hasAttribute(FIXED_BOTTOM_ATTR)) {
+        node.style.bottom = node.getAttribute(FIXED_BOTTOM_ATTR) || "";
+        node.removeAttribute(FIXED_BOTTOM_ATTR);
+      }
+
+      if (node.hasAttribute(FIXED_TRANSFORM_ATTR)) {
+        node.style.transform = node.getAttribute(FIXED_TRANSFORM_ATTR) || "";
+        node.removeAttribute(FIXED_TRANSFORM_ATTR);
+      }
+
+      node.removeAttribute(FIXED_OFFSET_ATTR);
+    });
+  }
+
+  function shouldOffsetFixedElement(node, metrics) {
+    if (!(node instanceof HTMLElement)) return false;
+    if (node === layout?.host || node.closest("arg-scout-layout")) return false;
+    if (PROTECTED_TAGS.has(node.localName)) return false;
+
+    const style = getComputedStyle(node);
+    if (style.position !== "fixed") return false;
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 1 || rect.height < 1) return false;
+    if (rect.height > Math.min(window.innerHeight * 0.45, metrics.bottom + 80)) return false;
+    if (rect.width > window.innerWidth * 0.8 && rect.height > metrics.bottom) return false;
+
+    const overlapsBottomTool = rect.bottom > window.innerHeight - metrics.bottom - 4;
+    const isNotCoveredByLeftPanelOnly = rect.right > metrics.left + 16;
+    return overlapsBottomTool && isNotCoveredByLeftPanelOnly;
+  }
+
+  function offsetFixedElement(node, offset) {
+    const style = getComputedStyle(node);
+    const computedBottom = parsePixelValue(style.bottom);
+
+    node.setAttribute(FIXED_OFFSET_ATTR, "true");
+    node.setAttribute(FIXED_BOTTOM_ATTR, node.style.bottom || "");
+    node.setAttribute(FIXED_TRANSFORM_ATTR, node.style.transform || "");
+
+    if (computedBottom !== null) {
+      node.style.bottom = `${computedBottom + offset}px`;
+      return;
+    }
+
+    const originalTransform = node.style.transform.trim();
+    node.style.transform = `${originalTransform} translateY(-${offset}px)`.trim();
+  }
+
+  function currentLayoutMetrics() {
+    const compact = window.matchMedia?.("(max-width: 760px)").matches;
+    return {
+      left: compact ? COMPACT_LEFT_WIDTH : LEFT_WIDTH,
+      bottom: compact ? COMPACT_BOTTOM_HEIGHT : BOTTOM_HEIGHT
+    };
   }
 
   function renderAll() {
@@ -371,10 +514,8 @@
         <button class="keyword-delete" type="button" aria-label="削除">×</button>
       `;
       item.querySelector(".keyword-use").textContent = keyword.text;
-      item.querySelector(".keyword-use").addEventListener("click", () => {
-        els.keywordInput.value = keyword.text;
-        els.keywordInput.focus();
-      });
+      item.querySelector(".keyword-use").title = "クリックでコピー";
+      item.querySelector(".keyword-use").addEventListener("click", () => copyKeywordText(keyword.text));
       item.querySelector(".keyword-delete").addEventListener("click", () => deleteKeyword(keyword.bucket, keyword.id));
       els.keywordList.append(item);
     });
@@ -466,6 +607,59 @@
     await saveState();
     setSaveStatus("一時保存しました", false);
     renderKeywords();
+  }
+
+  async function copyKeywordText(text) {
+    const keyword = String(text || "").trim();
+    if (!keyword) return;
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(keyword);
+      } else if (!fallbackCopyText(keyword)) {
+        throw new Error("Clipboard API is unavailable.");
+      }
+      setSaveStatus("コピーしました", false);
+    } catch {
+      if (fallbackCopyText(keyword)) {
+        setSaveStatus("コピーしました", false);
+        return;
+      }
+
+      els.keywordInput.value = keyword;
+      els.keywordInput.focus();
+      setSaveStatus("コピーできないため入力欄へ入れました", true);
+    }
+  }
+
+  function fallbackCopyText(text) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.top = "0";
+    document.documentElement.append(textarea);
+    textarea.select();
+
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      textarea.remove();
+    }
+  }
+
+  function toggleHelpPanel() {
+    const shouldOpen = els.helpPanel.hidden;
+    els.helpPanel.hidden = !shouldOpen;
+    els.helpButton.setAttribute("aria-expanded", String(shouldOpen));
+  }
+
+  function closeHelpPanel() {
+    els.helpPanel.hidden = true;
+    els.helpButton.setAttribute("aria-expanded", "false");
   }
 
   async function createArgSession() {
@@ -802,6 +996,12 @@
     return Number.isInteger(number) && number > 0 ? number : null;
   }
 
+  function parsePixelValue(value) {
+    if (!value || value === "auto") return null;
+    const number = Number.parseFloat(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
   function normalizeColor(value) {
     return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? value : null;
   }
@@ -924,7 +1124,8 @@
       }
 
       .side-panel,
-      .bottom-bar {
+      .bottom-bar,
+      .help-panel {
         position: fixed;
         z-index: 2147483647;
         border: 1px solid rgba(72, 95, 127, 0.95);
@@ -1177,12 +1378,13 @@
 
       .bar-head {
         border-bottom: 1px solid rgba(72, 95, 127, 0.82);
+        gap: 8px;
         padding: 0 14px;
       }
 
       .bar-head strong {
-        margin-left: auto;
-        margin-right: 12px;
+        margin-left: 0;
+        margin-right: 0;
       }
 
       .page-form {
@@ -1225,15 +1427,91 @@
       }
 
       .save-status {
-        min-width: 10em;
+        min-width: min(18ch, 30vw);
+        max-width: 28ch;
+        overflow: hidden;
         color: #19d2a0;
         font-style: normal;
         font-weight: 700;
         text-align: right;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
       .save-status.error {
         color: #ff6f91;
+      }
+
+      .help-button,
+      .help-close {
+        display: inline-grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        border: 1px solid rgba(72, 95, 127, 0.9);
+        border-radius: 5px;
+        background: rgba(5, 10, 22, 0.88);
+        color: #dce8f2;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .help-button:hover,
+      .help-button[aria-expanded="true"],
+      .help-close:hover {
+        border-color: rgba(25, 210, 160, 0.85);
+        color: #19d2a0;
+      }
+
+      .help-panel {
+        right: 12px;
+        bottom: ${BOTTOM_HEIGHT + 14}px;
+        left: ${LEFT_WIDTH + 12}px;
+        max-width: 620px;
+        max-height: min(420px, calc(100vh - ${BOTTOM_HEIGHT + 34}px));
+        overflow: auto;
+        border-radius: 6px;
+        pointer-events: auto;
+      }
+
+      .help-panel[hidden] {
+        display: none;
+      }
+
+      .help-head {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        border-bottom: 1px solid rgba(72, 95, 127, 0.82);
+        padding: 10px 12px;
+      }
+
+      .help-head strong {
+        margin-right: auto;
+        color: #eff7f4;
+        font-size: 13px;
+      }
+
+      .help-body {
+        display: grid;
+        gap: 10px;
+        padding: 12px 14px 14px;
+        color: #b8c8d8;
+      }
+
+      .help-body p {
+        margin: 0;
+      }
+
+      .help-body ul {
+        display: grid;
+        gap: 8px;
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .help-body strong {
+        color: #f7fffb;
       }
 
       .keyword-list {
@@ -1293,8 +1571,14 @@
         }
 
         .bottom-bar {
-          left: 170px;
-          min-height: 180px;
+          left: ${COMPACT_LEFT_WIDTH}px;
+          min-height: ${COMPACT_BOTTOM_HEIGHT}px;
+        }
+
+        .help-panel {
+          left: ${COMPACT_LEFT_WIDTH + 8}px;
+          bottom: ${COMPACT_BOTTOM_HEIGHT + 10}px;
+          max-height: min(380px, calc(100vh - ${COMPACT_BOTTOM_HEIGHT + 24}px));
         }
 
         .page-form {

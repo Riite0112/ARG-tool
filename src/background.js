@@ -138,6 +138,18 @@ async function forceHideLayout(tab) {
           host.hidden = true;
           host.style.display = "none";
         }
+        document.querySelectorAll("[data-arg-scout-fixed-offset]").forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          if (node.hasAttribute("data-arg-scout-fixed-bottom")) {
+            node.style.bottom = node.getAttribute("data-arg-scout-fixed-bottom") || "";
+            node.removeAttribute("data-arg-scout-fixed-bottom");
+          }
+          if (node.hasAttribute("data-arg-scout-fixed-transform")) {
+            node.style.transform = node.getAttribute("data-arg-scout-fixed-transform") || "";
+            node.removeAttribute("data-arg-scout-fixed-transform");
+          }
+          node.removeAttribute("data-arg-scout-fixed-offset");
+        });
         document.documentElement.classList.remove("arg-scout-layout-active");
         document.getElementById("arg-scout-layout-style")?.remove();
       }
