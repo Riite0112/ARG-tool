@@ -406,9 +406,14 @@
 
   function currentLayoutMetrics() {
     const compact = window.matchMedia?.("(max-width: 760px)").matches;
+    const defaultLeft = compact ? COMPACT_LEFT_WIDTH : LEFT_WIDTH;
+    const defaultBottom = compact ? COMPACT_BOTTOM_HEIGHT : BOTTOM_HEIGHT;
+    const sideRect = layout?.shadow.querySelector(".side-panel")?.getBoundingClientRect();
+    const bottomRect = layout?.shadow.querySelector(".bottom-bar")?.getBoundingClientRect();
+
     return {
-      left: compact ? COMPACT_LEFT_WIDTH : LEFT_WIDTH,
-      bottom: compact ? COMPACT_BOTTOM_HEIGHT : BOTTOM_HEIGHT
+      left: sideRect?.right ? Math.ceil(sideRect.right) : defaultLeft,
+      bottom: bottomRect?.height ? Math.ceil(bottomRect.height) : defaultBottom
     };
   }
 
@@ -418,6 +423,7 @@
     renderPages();
     renderKeywords();
     renderProgress();
+    scheduleProtectFixedElements();
   }
 
   function renderSession() {
@@ -1369,11 +1375,19 @@
         left: ${LEFT_WIDTH}px;
         right: 8px;
         bottom: 0;
-        min-height: ${BOTTOM_HEIGHT}px;
+        height: ${BOTTOM_HEIGHT}px;
+        max-height: ${BOTTOM_HEIGHT}px;
+        min-height: 0;
         border-bottom: 0;
         border-radius: 6px 6px 0 0;
         display: grid;
         grid-template-rows: 30px auto minmax(58px, 1fr);
+        overflow: hidden;
+      }
+
+      .bottom-bar > * {
+        min-width: 0;
+        min-height: 0;
       }
 
       .bar-head {
@@ -1392,6 +1406,7 @@
         grid-template-columns: 84px 92px minmax(220px, 1fr) 92px 92px;
         gap: 8px;
         align-items: end;
+        min-height: 0;
         padding: 10px 12px 0;
       }
 
@@ -1520,10 +1535,13 @@
         align-content: start;
         gap: 7px;
         min-height: 0;
+        max-height: 100%;
         margin: 0;
         padding: 12px;
         list-style: none;
         overflow: auto;
+        overscroll-behavior: contain;
+        scrollbar-gutter: stable;
       }
 
       .keyword-empty {
@@ -1572,7 +1590,8 @@
 
         .bottom-bar {
           left: ${COMPACT_LEFT_WIDTH}px;
-          min-height: ${COMPACT_BOTTOM_HEIGHT}px;
+          height: ${COMPACT_BOTTOM_HEIGHT}px;
+          max-height: ${COMPACT_BOTTOM_HEIGHT}px;
         }
 
         .help-panel {
