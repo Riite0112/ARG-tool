@@ -14,9 +14,9 @@
   const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
   const STATE_VERSION = 7;
   const LEFT_WIDTH = 204;
-  const BOTTOM_HEIGHT = 150;
+  const BOTTOM_HEIGHT = 190;
   const COMPACT_LEFT_WIDTH = 170;
-  const COMPACT_BOTTOM_HEIGHT = 180;
+  const COMPACT_BOTTOM_HEIGHT = 220;
   const PROTECTED_TAGS = new Set(["script", "style", "link", "meta", "title", "noscript"]);
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
 
@@ -1381,7 +1381,7 @@
         border-bottom: 0;
         border-radius: 6px 6px 0 0;
         display: grid;
-        grid-template-rows: 30px auto minmax(58px, 1fr);
+        grid-template-rows: 30px auto minmax(92px, 1fr);
         overflow: hidden;
       }
 
