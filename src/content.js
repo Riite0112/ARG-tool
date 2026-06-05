@@ -10,6 +10,7 @@
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
   const ROOT_CLASS = "arg-scout-layout-active";
   const FIXED_OFFSET_ATTR = "data-arg-scout-fixed-offset";
+  const FIXED_STYLE_ATTR = "data-arg-scout-fixed-style";
   const FIXED_BOTTOM_ATTR = "data-arg-scout-fixed-bottom";
   const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
   const STATE_VERSION = 7;
@@ -312,6 +313,8 @@
 
     fixedElementObserver = new MutationObserver(scheduleProtectFixedElements);
     fixedElementObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "hidden"],
       childList: true,
       subtree: true
     });
@@ -341,18 +344,32 @@
     restorePageFixedElements();
 
     const metrics = currentLayoutMetrics();
-    const offset = metrics.bottom + 12;
     const candidates = [...document.body.querySelectorAll("*")];
 
     candidates.forEach((node) => {
-      if (!shouldOffsetFixedElement(node, metrics)) return;
-      offsetFixedElement(node, offset);
+      const protection = getFixedElementProtection(node, metrics);
+      if (!protection) return;
+      offsetFixedElement(node, protection);
     });
   }
 
   function restorePageFixedElements() {
     document.querySelectorAll(`[${FIXED_OFFSET_ATTR}]`).forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
+
+      if (node.hasAttribute(FIXED_STYLE_ATTR)) {
+        const style = node.getAttribute(FIXED_STYLE_ATTR) || "";
+        if (style) {
+          node.setAttribute("style", style);
+        } else {
+          node.removeAttribute("style");
+        }
+        node.removeAttribute(FIXED_STYLE_ATTR);
+        node.removeAttribute(FIXED_BOTTOM_ATTR);
+        node.removeAttribute(FIXED_TRANSFORM_ATTR);
+        node.removeAttribute(FIXED_OFFSET_ATTR);
+        return;
+      }
 
       if (node.hasAttribute(FIXED_BOTTOM_ATTR)) {
         node.style.bottom = node.getAttribute(FIXED_BOTTOM_ATTR) || "";
@@ -368,7 +385,7 @@
     });
   }
 
-  function shouldOffsetFixedElement(node, metrics) {
+  function getFixedElementProtection(node, metrics) {
     if (!(node instanceof HTMLElement)) return false;
     if (node === layout?.host || node.closest("arg-scout-layout")) return false;
     if (PROTECTED_TAGS.has(node.localName)) return false;
@@ -379,29 +396,74 @@
 
     const rect = node.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return false;
-    if (rect.height > Math.min(window.innerHeight * 0.45, metrics.bottom + 80)) return false;
-    if (rect.width > window.innerWidth * 0.8 && rect.height > metrics.bottom) return false;
 
     const overlapsBottomTool = rect.bottom > window.innerHeight - metrics.bottom - 4;
-    const isNotCoveredByLeftPanelOnly = rect.right > metrics.left + 16;
-    return overlapsBottomTool && isNotCoveredByLeftPanelOnly;
+    const overlapsLeftTool = rect.left < metrics.left + 4;
+    const isCompactFixedItem = rect.width <= 420 && rect.height <= Math.max(340, window.innerHeight * 0.62);
+    const isWideTopBar = rect.width >= Math.min(420, window.innerWidth * 0.45);
+
+    if (overlapsBottomTool && overlapsLeftTool && isCompactFixedItem) {
+      const computedBottom = parsePixelValue(style.bottom);
+      return {
+        left: metrics.left + 12,
+        bottom: (computedBottom || 0) + metrics.bottom + 12
+      };
+    }
+
+    if (overlapsBottomTool && rect.right > metrics.left + 16) {
+      if (rect.height > Math.min(window.innerHeight * 0.45, metrics.bottom + 80)) return false;
+      if (rect.width > window.innerWidth * 0.8 && rect.height > metrics.bottom) return false;
+      const computedBottom = parsePixelValue(style.bottom);
+      return {
+        bottom: computedBottom !== null ? computedBottom + metrics.bottom + 12 : null,
+        transformY: computedBottom === null ? -(metrics.bottom + 12) : null
+      };
+    }
+
+    if (overlapsLeftTool && rect.top < 24 && rect.height <= window.innerHeight * 0.36 && isWideTopBar) {
+      return {
+        left: metrics.left,
+        width: `calc(100% - ${metrics.left}px)`
+      };
+    }
+
+    if (overlapsLeftTool && rect.top < 24 && isCompactFixedItem) {
+      return {
+        left: metrics.left + 12
+      };
+    }
+
+    return false;
   }
 
-  function offsetFixedElement(node, offset) {
-    const style = getComputedStyle(node);
-    const computedBottom = parsePixelValue(style.bottom);
-
+  function offsetFixedElement(node, protection) {
     node.setAttribute(FIXED_OFFSET_ATTR, "true");
+    node.setAttribute(FIXED_STYLE_ATTR, node.getAttribute("style") || "");
     node.setAttribute(FIXED_BOTTOM_ATTR, node.style.bottom || "");
     node.setAttribute(FIXED_TRANSFORM_ATTR, node.style.transform || "");
 
-    if (computedBottom !== null) {
-      node.style.bottom = `${computedBottom + offset}px`;
-      return;
+    if (typeof protection.left === "number") {
+      node.style.setProperty("left", `${protection.left}px`, "important");
     }
 
-    const originalTransform = node.style.transform.trim();
-    node.style.transform = `${originalTransform} translateY(-${offset}px)`.trim();
+    if (typeof protection.bottom === "number") {
+      node.style.setProperty("bottom", `${protection.bottom}px`, "important");
+    }
+
+    if (protection.width) {
+      node.style.setProperty("width", protection.width, "important");
+      node.style.setProperty("max-width", protection.width, "important");
+      node.style.setProperty("box-sizing", "border-box", "important");
+    }
+
+    if (typeof protection.transformY === "number") {
+      const originalTransform = node.style.transform.trim();
+      node.style.setProperty(
+        "transform",
+        `${originalTransform} translateY(${protection.transformY}px)`.trim(),
+        "important"
+      );
+    }
   }
 
   function currentLayoutMetrics() {

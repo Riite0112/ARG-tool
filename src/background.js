@@ -140,6 +140,19 @@ async function forceHideLayout(tab) {
         }
         document.querySelectorAll("[data-arg-scout-fixed-offset]").forEach((node) => {
           if (!(node instanceof HTMLElement)) return;
+          if (node.hasAttribute("data-arg-scout-fixed-style")) {
+            const style = node.getAttribute("data-arg-scout-fixed-style") || "";
+            if (style) {
+              node.setAttribute("style", style);
+            } else {
+              node.removeAttribute("style");
+            }
+            node.removeAttribute("data-arg-scout-fixed-style");
+            node.removeAttribute("data-arg-scout-fixed-bottom");
+            node.removeAttribute("data-arg-scout-fixed-transform");
+            node.removeAttribute("data-arg-scout-fixed-offset");
+            return;
+          }
           if (node.hasAttribute("data-arg-scout-fixed-bottom")) {
             node.style.bottom = node.getAttribute("data-arg-scout-fixed-bottom") || "";
             node.removeAttribute("data-arg-scout-fixed-bottom");
