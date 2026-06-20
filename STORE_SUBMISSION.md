@@ -11,6 +11,16 @@
 - 言語候補: 日本語
 - 初回公開の公開範囲候補: まずは限定公開または未掲載、動作確認後に公開
 
+## 画像アセット
+
+- ショップアイコン: `store-assets/shop-icon-128.png`
+- スクリーンショット1: `store-assets/screenshot-01-investigation-ui-1280x800.png`
+- スクリーンショット2: `store-assets/screenshot-02-keyword-copy-1280x800.png`
+- スクリーンショット3: `store-assets/screenshot-03-multi-arg-log-1280x800.png`
+- プロモーション タイル（小）: `store-assets/promo-small-440x280.png`
+- マーキー プロモーション タイル: `store-assets/promo-marquee-1400x560.png`
+- 画像アセットまとめzip: `dist/chrome-web-store-assets-0.1.11.zip`
+
 ## アップロード理由 / 審査担当者向け説明
 
 ARGやWeb謎解きをプレイしているユーザーが、調査中に見つけたページ番号、到達キーワード、URL、候補キーワードをブラウザ内で整理するための補助ツールです。
