@@ -14,9 +14,9 @@
   const FIXED_BOTTOM_ATTR = "data-arg-scout-fixed-bottom";
   const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
   const STATE_VERSION = 7;
-  const LEFT_WIDTH = 204;
+  const LEFT_WIDTH = 260;
   const BOTTOM_HEIGHT = 190;
-  const COMPACT_LEFT_WIDTH = 170;
+  const COMPACT_LEFT_WIDTH = 217;
   const COMPACT_BOTTOM_HEIGHT = 220;
   const PROTECTED_TAGS = new Set(["script", "style", "link", "meta", "title", "noscript"]);
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
@@ -1206,7 +1206,7 @@
         left: 8px;
         top: 8px;
         bottom: ${BOTTOM_HEIGHT + 8}px;
-        width: 188px;
+        width: 244px;
         display: grid;
         grid-template-rows: 128px auto minmax(0, 1fr) 58px;
         overflow: hidden;
@@ -1646,7 +1646,7 @@
 
       @media (max-width: 760px) {
         .side-panel {
-          width: 158px;
+          width: 205px;
           bottom: 188px;
         }
 
