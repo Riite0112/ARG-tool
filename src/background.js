@@ -2,6 +2,8 @@ const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
 const STATE_VERSION = 7;
+const DEFAULT_LAYOUT_VIEW = "all";
+const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
@@ -13,11 +15,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup?.addListener(updateBadge);
-
-chrome.action.onClicked.addListener(async (tab) => {
-  await toggleLayout(tab);
-  await updateBadge();
-});
 
 chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   if (changeInfo.status !== "complete" || !isSavableTab(tab)) return;
@@ -59,8 +56,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
-    showLayout(message.tab || sender.tab, { rememberSite: Boolean(message.rememberSite) })
+    showLayout(message.tab || sender.tab, {
+      rememberSite: Boolean(message.rememberSite),
+      view: message.view
+    })
       .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "ARG_SCOUT_OPEN_TOOL_VIEW") {
+    openToolView(message.view)
+      .then((state) => sendResponse({ ok: true, ...state }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "ARG_SCOUT_HIDE_TOOL") {
+    hideActiveTool()
+      .then((state) => sendResponse({ ok: true, ...state }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "ARG_SCOUT_GET_POPUP_STATE") {
+    getActiveTab()
+      .then(getPopupState)
+      .then((state) => sendResponse({ ok: true, ...state }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
     return true;
   }
@@ -68,37 +90,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function toggleLayout(tab) {
+async function getActiveTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab || null;
+}
+
+async function openToolView(view) {
+  const tab = await getActiveTab();
+  if (!isSavableTab(tab)) {
+    return { savable: false };
+  }
+
+  await showLayout(tab, {
+    rememberSite: true,
+    view: normalizeLayoutView(view)
+  });
+  await updateBadge();
+  return getPopupState(tab);
+}
+
+async function hideActiveTool() {
+  const tab = await getActiveTab();
+  if (!isSavableTab(tab)) {
+    return { savable: false };
+  }
+
+  await hideLayoutForTab(tab);
+  await updateBadge();
+  return getPopupState(tab);
+}
+
+async function hideLayoutForTab(tab) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
   const store = await loadState();
-  let session = resolveSessionForUrl(store, tab.url, { create: false });
-  const isTracked = session && isTrackedUrl(tab.url, session);
-  const isHidden = session && isHiddenUrl(tab.url, session);
-
-  if (isTracked && !isHidden) {
+  const session = resolveSessionForUrl(store, tab.url, { create: false });
+  if (session) {
     addHiddenSiteFromUrl(session, tab.url);
     store.activeSessionId = session.id;
     await saveState(store);
-    await sendLayoutMessage(tab, { type: "ARG_SCOUT_HIDE_LAYOUT" });
-    await forceHideLayout(tab);
-    return;
   }
 
-  if (!session) {
-    session = createSession(tab);
-    store.sessions.push(session);
-  }
-  addTrackedSiteFromUrl(session, tab.url);
-  removeHiddenSiteFromUrl(session, tab.url);
-  store.activeSessionId = session.id;
-  await saveState(store);
-  await forceRevealLayoutHost(tab);
-  await sendLayoutMessage(tab, {
-    type: "ARG_SCOUT_SHOW_LAYOUT",
-    rememberSite: true,
-    clearHidden: true
-  });
+  await sendLayoutMessage(tab, { type: "ARG_SCOUT_HIDE_LAYOUT" });
+  await forceHideLayout(tab);
 }
 
 async function sendLayoutMessage(tab, message) {
@@ -172,25 +206,6 @@ async function forceHideLayout(tab) {
   }
 }
 
-async function forceRevealLayoutHost(tab) {
-  if (!isSavableTab(tab) || tab.id == null) return;
-
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        const host = document.querySelector("arg-scout-layout");
-        if (host) {
-          host.hidden = false;
-          host.style.display = "";
-        }
-      }
-    });
-  } catch {
-    // Some browser pages do not allow injected scripts.
-  }
-}
-
 async function showLayout(tab, options = {}) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
@@ -209,7 +224,8 @@ async function showLayout(tab, options = {}) {
 
   const message = {
     type: "ARG_SCOUT_SHOW_LAYOUT",
-    rememberSite: Boolean(options.rememberSite)
+    rememberSite: Boolean(options.rememberSite),
+    view: normalizeLayoutView(options.view)
   };
 
   try {
@@ -219,9 +235,42 @@ async function showLayout(tab, options = {}) {
   }
 }
 
+async function getPopupState(tab) {
+  if (!isSavableTab(tab)) {
+    return {
+      savable: false,
+      url: tab?.url || ""
+    };
+  }
+
+  const store = await loadState();
+  const session = resolveSessionForUrl(store, tab.url, { create: false });
+  const currentEntry = session?.entries.find((entry) => entry.url === tab.url) || null;
+  const keywordCount = (session?.keywords.primary.length || 0) + (session?.keywords.reserve.length || 0);
+  const base = normalizeSiteBase(tab.url);
+
+  return {
+    savable: true,
+    url: tab.url,
+    site: readableSite(base),
+    tracked: Boolean(session && isTrackedUrl(tab.url, session)),
+    hidden: Boolean(session && isHiddenUrl(tab.url, session)),
+    sessionTitle: session?.sessionTitle || defaultSessionTitle(tab.url),
+    pageCount: session?.entries.length || 0,
+    keywordCount,
+    targetPages: session?.targetPages || 0,
+    currentPageNo: currentEntry?.pageNo || null
+  };
+}
+
 function isSavableTab(tab) {
   if (!tab?.url) return false;
   return !/^(chrome|chrome-extension|edge|about):/i.test(tab.url);
+}
+
+function normalizeLayoutView(view) {
+  const normalized = String(view || DEFAULT_LAYOUT_VIEW);
+  return LAYOUT_VIEWS.has(normalized) ? normalized : DEFAULT_LAYOUT_VIEW;
 }
 
 async function loadState() {
@@ -404,6 +453,16 @@ function normalizeSiteBase(value) {
     return /^https?:$/.test(url.protocol) ? url.origin : "";
   } catch {
     return "";
+  }
+}
+
+function readableSite(value) {
+  if (!value) return "";
+
+  try {
+    return new URL(value).hostname;
+  } catch {
+    return value.replace(/^https?:\/\//, "");
   }
 }
 

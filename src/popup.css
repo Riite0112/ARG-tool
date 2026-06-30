@@ -1,0 +1,236 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0a0f19;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  margin: 0;
+  background:
+    linear-gradient(135deg, rgba(18, 132, 136, 0.9), rgba(8, 18, 32, 0.96) 38%),
+    #0a0f19;
+  color: #eef6f4;
+}
+
+button {
+  font: inherit;
+}
+
+.popup-shell {
+  display: grid;
+  gap: 10px;
+  min-height: 312px;
+  padding: 12px;
+}
+
+.popup-head {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 10px;
+}
+
+.popup-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.title-block {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.title-block strong {
+  font-size: 15px;
+}
+
+.title-block span {
+  overflow: hidden;
+  color: #aab9ca;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(77, 101, 136, 0.9);
+  border-radius: 6px;
+  background: rgba(8, 14, 27, 0.72);
+  color: #cfe2f2;
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  border-color: rgba(34, 230, 178, 0.8);
+  color: #22e6b2;
+}
+
+.icon-button.danger:hover {
+  border-color: rgba(255, 111, 145, 0.78);
+  color: #ff8baa;
+}
+
+.session-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(77, 101, 136, 0.85);
+  border-radius: 8px;
+  background: rgba(13, 19, 32, 0.94);
+  padding: 11px;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-title-row strong {
+  overflow: hidden;
+  flex: 1;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state-pill {
+  border: 1px solid rgba(34, 230, 178, 0.52);
+  border-radius: 999px;
+  color: #22e6b2;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 3px 8px;
+}
+
+.state-pill.hidden {
+  border-color: rgba(255, 111, 145, 0.58);
+  color: #ff8baa;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.metrics span {
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(77, 101, 136, 0.68);
+  border-radius: 6px;
+  background: rgba(5, 10, 22, 0.78);
+  color: #9daabe;
+  font-size: 10px;
+  font-weight: 850;
+  padding: 7px;
+}
+
+.metrics strong {
+  color: #f7fffb;
+  font-size: 18px;
+}
+
+.tool-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(77, 101, 136, 0.85);
+  border-radius: 8px;
+  background: rgba(8, 12, 23, 0.94);
+}
+
+.tool-tab {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 78px;
+  border: 0;
+  border-right: 1px solid rgba(77, 101, 136, 0.45);
+  background: transparent;
+  color: #9daabe;
+  cursor: pointer;
+  padding: 8px 4px;
+}
+
+.tool-tab:last-child {
+  border-right: 0;
+}
+
+.tool-tab:hover,
+.tool-tab.active {
+  background: rgba(34, 230, 178, 0.1);
+  color: #22e6b2;
+}
+
+.tool-tab.muted:hover {
+  background: rgba(255, 111, 145, 0.12);
+  color: #ff8baa;
+}
+
+.tool-tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.tab-icon {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid rgba(77, 101, 136, 0.8);
+  border-radius: 7px;
+  background: rgba(17, 28, 48, 0.9);
+  color: inherit;
+  font-size: 14px;
+  font-weight: 950;
+}
+
+.tool-tab strong {
+  color: #f7fffb;
+  font-size: 12px;
+}
+
+.tool-tab small {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-text {
+  min-height: 32px;
+  margin: 0;
+  border: 1px solid rgba(77, 101, 136, 0.6);
+  border-radius: 8px;
+  background: rgba(8, 12, 23, 0.82);
+  color: #c4d3e3;
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+}
+
+.status-text.ok {
+  border-color: rgba(34, 230, 178, 0.52);
+  color: #75f0cd;
+}
+
+.status-text.error {
+  border-color: rgba(255, 111, 145, 0.58);
+  color: #ff9db7;
+}

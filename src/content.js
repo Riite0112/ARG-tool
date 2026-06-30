@@ -14,6 +14,8 @@
   const FIXED_BOTTOM_ATTR = "data-arg-scout-fixed-bottom";
   const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
   const STATE_VERSION = 7;
+  const DEFAULT_LAYOUT_VIEW = "all";
+  const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
   const LEFT_WIDTH = 260;
   const BOTTOM_HEIGHT = 190;
   const COMPACT_LEFT_WIDTH = 217;
@@ -47,6 +49,7 @@
   let store = structuredClone(initialStore);
   let state = structuredClone(initialState);
   let layout = null;
+  let layoutView = DEFAULT_LAYOUT_VIEW;
   let els = {};
   let fixedElementObserver = null;
   let fixedElementFrame = 0;
@@ -65,11 +68,18 @@
       if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
         showLayout({
           rememberSite: Boolean(message.rememberSite),
-          clearHidden: message.clearHidden !== false
+          clearHidden: message.clearHidden !== false,
+          view: message.view
         })
           .then(() => sendResponse({ ok: true, visible: true }))
           .catch((error) => sendResponse({ ok: false, error: error.message }));
         return true;
+      }
+
+      if (message?.type === "ARG_SCOUT_SET_VIEW") {
+        setLayoutView(message.view);
+        sendResponse({ ok: true, visible: isLayoutVisible(), view: layoutView });
+        return;
       }
 
       if (message?.type === "ARG_SCOUT_HIDE_LAYOUT") {
@@ -115,7 +125,7 @@
 
   async function showLayout(options = {}) {
     ensureLayout();
-    applyPageLayout();
+    setLayoutView(options.view);
     await loadState({ create: true });
     if (options.clearHidden) {
       forgetHiddenCurrentSite();
@@ -166,7 +176,7 @@
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
       <style>${layoutStyles()}</style>
-      <div class="layout-root" aria-live="polite">
+      <div class="layout-root" data-view="${layoutView}" aria-live="polite">
         <aside class="side-panel">
           <header class="side-brand">
             <div class="brand-row">
@@ -228,7 +238,7 @@
           <div class="help-body">
             <p>ARGごとにページ番号、到達キーワード、URLを手動で記録できます。</p>
             <ul>
-              <li>右上の拡張機能アイコンで表示/非表示を切り替えます。</li>
+              <li>右上の拡張機能アイコンで表示メニューを開き、ページ、キーワード、両方表示、非表示を選びます。</li>
               <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
               <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
@@ -243,6 +253,21 @@
     document.documentElement.append(host);
     layout = { host, shadow };
     bindLayoutElements();
+  }
+
+  function normalizeLayoutView(view) {
+    const normalized = String(view || DEFAULT_LAYOUT_VIEW);
+    return LAYOUT_VIEWS.has(normalized) ? normalized : DEFAULT_LAYOUT_VIEW;
+  }
+
+  function setLayoutView(view) {
+    layoutView = normalizeLayoutView(view);
+    layout?.shadow.querySelector(".layout-root")?.setAttribute("data-view", layoutView);
+    if (layoutView !== "all" && els.helpPanel) {
+      closeHelpPanel();
+    }
+    applyPageLayout();
+    scheduleProtectFixedElements();
   }
 
   function bindLayoutElements() {
@@ -270,6 +295,12 @@
 
   function applyPageLayout() {
     document.documentElement.classList.add(ROOT_CLASS);
+    const usesSidePanel = layoutView !== "keywords";
+    const usesBottomBar = layoutView !== "pages";
+    const leftWidth = usesSidePanel ? LEFT_WIDTH : 0;
+    const bottomHeight = usesBottomBar ? BOTTOM_HEIGHT : 0;
+    const compactLeftWidth = usesSidePanel ? COMPACT_LEFT_WIDTH : 0;
+    const compactBottomHeight = usesBottomBar ? COMPACT_BOTTOM_HEIGHT : 0;
 
     let style = document.getElementById(LAYOUT_STYLE_ID);
     if (!style) {
@@ -281,16 +312,16 @@
     style.textContent = `
       html.${ROOT_CLASS} body {
         box-sizing: border-box !important;
-        margin-left: ${LEFT_WIDTH}px !important;
-        margin-bottom: ${BOTTOM_HEIGHT}px !important;
-        max-width: calc(100vw - ${LEFT_WIDTH}px) !important;
-        min-height: calc(100vh - ${BOTTOM_HEIGHT}px) !important;
+        margin-left: ${leftWidth}px !important;
+        margin-bottom: ${bottomHeight}px !important;
+        max-width: calc(100vw - ${leftWidth}px) !important;
+        min-height: calc(100vh - ${bottomHeight}px) !important;
       }
       @media (max-width: 760px) {
         html.${ROOT_CLASS} body {
-          margin-left: ${COMPACT_LEFT_WIDTH}px !important;
-          max-width: calc(100vw - ${COMPACT_LEFT_WIDTH}px) !important;
-          margin-bottom: ${COMPACT_BOTTOM_HEIGHT}px !important;
+          margin-left: ${compactLeftWidth}px !important;
+          max-width: calc(100vw - ${compactLeftWidth}px) !important;
+          margin-bottom: ${compactBottomHeight}px !important;
         }
       }
     `;
@@ -472,10 +503,12 @@
     const defaultBottom = compact ? COMPACT_BOTTOM_HEIGHT : BOTTOM_HEIGHT;
     const sideRect = layout?.shadow.querySelector(".side-panel")?.getBoundingClientRect();
     const bottomRect = layout?.shadow.querySelector(".bottom-bar")?.getBoundingClientRect();
+    const usesSidePanel = layoutView !== "keywords";
+    const usesBottomBar = layoutView !== "pages";
 
     return {
-      left: sideRect?.right ? Math.ceil(sideRect.right) : defaultLeft,
-      bottom: bottomRect?.height ? Math.ceil(bottomRect.height) : defaultBottom
+      left: usesSidePanel ? (sideRect?.right ? Math.ceil(sideRect.right) : defaultLeft) : 0,
+      bottom: usesBottomBar ? (bottomRect?.height ? Math.ceil(bottomRect.height) : defaultBottom) : 0
     };
   }
 
@@ -1213,6 +1246,15 @@
         border-radius: 6px;
       }
 
+      .layout-root[data-view="pages"] .side-panel {
+        bottom: 8px;
+      }
+
+      .layout-root[data-view="keywords"] .side-panel,
+      .layout-root[data-view="pages"] .bottom-bar {
+        display: none;
+      }
+
       .side-brand {
         display: grid;
         align-content: center;
@@ -1447,6 +1489,10 @@
         overflow: hidden;
       }
 
+      .layout-root[data-view="keywords"] .bottom-bar {
+        left: 8px;
+      }
+
       .bottom-bar > * {
         min-width: 0;
         min-height: 0;
@@ -1551,6 +1597,10 @@
         pointer-events: auto;
       }
 
+      .layout-root[data-view="keywords"] .help-panel {
+        left: 12px;
+      }
+
       .help-panel[hidden] {
         display: none;
       }
@@ -1650,16 +1700,28 @@
           bottom: 188px;
         }
 
+        .layout-root[data-view="pages"] .side-panel {
+          bottom: 8px;
+        }
+
         .bottom-bar {
           left: ${COMPACT_LEFT_WIDTH}px;
           height: ${COMPACT_BOTTOM_HEIGHT}px;
           max-height: ${COMPACT_BOTTOM_HEIGHT}px;
         }
 
+        .layout-root[data-view="keywords"] .bottom-bar {
+          left: 8px;
+        }
+
         .help-panel {
           left: ${COMPACT_LEFT_WIDTH + 8}px;
           bottom: ${COMPACT_BOTTOM_HEIGHT + 10}px;
           max-height: min(380px, calc(100vh - ${COMPACT_BOTTOM_HEIGHT + 24}px));
+        }
+
+        .layout-root[data-view="keywords"] .help-panel {
+          left: 8px;
         }
 
         .page-form {
