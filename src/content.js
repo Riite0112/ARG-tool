@@ -13,6 +13,8 @@
   const FIXED_STYLE_ATTR = "data-arg-scout-fixed-style";
   const FIXED_BOTTOM_ATTR = "data-arg-scout-fixed-bottom";
   const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
+  const SHORTCUT_PANEL_ATTR = "data-arg-scout-shortcut-panel";
+  const SHORTCUT_STYLE_ATTR = "data-arg-scout-shortcut-style";
   const STATE_VERSION = 7;
   const DEFAULT_LAYOUT_VIEW = "all";
   const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
@@ -341,6 +343,7 @@
   function resetPageLayout() {
     stopFixedElementProtection();
     restorePageFixedElements();
+    restorePageShortcutPanels();
     document.documentElement.classList.remove(ROOT_CLASS);
     document.getElementById(LAYOUT_STYLE_ID)?.remove();
   }
@@ -354,7 +357,7 @@
     fixedElementObserver = new MutationObserver(scheduleProtectFixedElements);
     fixedElementObserver.observe(document.body, {
       attributes: true,
-      attributeFilter: ["class", "hidden"],
+      attributeFilter: ["aria-hidden", "class", "hidden", "style"],
       childList: true,
       subtree: true
     });
@@ -385,11 +388,67 @@
 
     const metrics = currentLayoutMetrics();
     const candidates = [...document.body.querySelectorAll("*")];
+    suppressShortcutHelpPanels(candidates);
 
     candidates.forEach((node) => {
       const protection = getFixedElementProtection(node, metrics);
       if (!protection) return;
       offsetFixedElement(node, protection);
+    });
+  }
+
+  function suppressShortcutHelpPanels(candidates) {
+    const panels = candidates.filter(isShortcutHelpPanel);
+    panels.forEach((node) => {
+      if (panels.some((panel) => panel !== node && panel.contains(node))) return;
+      hideShortcutHelpPanel(node);
+    });
+  }
+
+  function isShortcutHelpPanel(node) {
+    if (!(node instanceof HTMLElement)) return false;
+    if (node === layout?.host || node.closest("arg-scout-layout")) return false;
+    if (PROTECTED_TAGS.has(node.localName)) return false;
+
+    const style = getComputedStyle(node);
+    if (!["absolute", "fixed", "sticky"].includes(style.position)) return false;
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+
+    const rect = node.getBoundingClientRect();
+    if (rect.width < Math.min(360, window.innerWidth * 0.25)) return false;
+    if (rect.height < 80 || rect.height > window.innerHeight * 0.72) return false;
+    if (rect.top > 80 || rect.left > window.innerWidth * 0.42) return false;
+
+    const text = node.textContent?.replace(/\s+/g, " ").trim() || "";
+    if (text.length < 20 || text.length > 3000) return false;
+
+    const hasShortcutPhrase = /キーボードショートカット|ショートカットの表示\/非表示|ショートカットの表示|keyboard shortcuts?/i.test(text);
+    const hasNavigationPhrase = /次に移動|メインコンテンツ|skip to|main content/i.test(text);
+    const hasKeyName = /\b(Alt|Shift|Ctrl|Control|Option|Command)\b|ショートカット/i.test(text);
+    return hasShortcutPhrase && (hasNavigationPhrase || hasKeyName);
+  }
+
+  function hideShortcutHelpPanel(node) {
+    if (node.hasAttribute(SHORTCUT_PANEL_ATTR)) return;
+
+    node.setAttribute(SHORTCUT_PANEL_ATTR, "true");
+    node.setAttribute(SHORTCUT_STYLE_ATTR, node.getAttribute("style") || "");
+    node.style.setProperty("display", "none", "important");
+    node.style.setProperty("visibility", "hidden", "important");
+  }
+
+  function restorePageShortcutPanels() {
+    document.querySelectorAll(`[${SHORTCUT_PANEL_ATTR}]`).forEach((node) => {
+      if (!(node instanceof HTMLElement)) return;
+
+      const style = node.getAttribute(SHORTCUT_STYLE_ATTR) || "";
+      if (style) {
+        node.setAttribute("style", style);
+      } else {
+        node.removeAttribute("style");
+      }
+      node.removeAttribute(SHORTCUT_STYLE_ATTR);
+      node.removeAttribute(SHORTCUT_PANEL_ATTR);
     });
   }
 

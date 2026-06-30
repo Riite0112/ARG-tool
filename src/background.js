@@ -197,6 +197,17 @@ async function forceHideLayout(tab) {
           }
           node.removeAttribute("data-arg-scout-fixed-offset");
         });
+        document.querySelectorAll("[data-arg-scout-shortcut-panel]").forEach((node) => {
+          if (!(node instanceof HTMLElement)) return;
+          const style = node.getAttribute("data-arg-scout-shortcut-style") || "";
+          if (style) {
+            node.setAttribute("style", style);
+          } else {
+            node.removeAttribute("style");
+          }
+          node.removeAttribute("data-arg-scout-shortcut-style");
+          node.removeAttribute("data-arg-scout-shortcut-panel");
+        });
         document.documentElement.classList.remove("arg-scout-layout-active");
         document.getElementById("arg-scout-layout-style")?.remove();
       }

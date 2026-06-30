@@ -5,8 +5,8 @@
 ## 提出パッケージ
 
 - 拡張機能名: ARG探索ツール
-- バージョン: 0.1.14
-- 提出zip: `dist/arg-scout-0.1.14.zip`
+- バージョン: 0.1.15
+- 提出zip: `dist/arg-scout-0.1.15.zip`
 - カテゴリ候補: 仕事効率化 / ツール
 - 言語候補: 日本語
 - 初回公開の公開範囲候補: まずは限定公開または未掲載、動作確認後に公開
@@ -19,7 +19,7 @@
 - スクリーンショット3: `store-assets/screenshot-03-multi-arg-log-1280x800.png`
 - プロモーション タイル（小）: `store-assets/promo-small-440x280.png`
 - マーキー プロモーション タイル: `store-assets/promo-marquee-1400x560.png`
-- 画像アセットまとめzip: `dist/chrome-web-store-assets-0.1.14.zip`
+- 画像アセットまとめzip: `dist/chrome-web-store-assets-0.1.15.zip`
 
 ## アップロード理由 / 審査担当者向け説明
 
@@ -125,13 +125,14 @@ GitHubで公開する場合:
 - 左パネルと下バーの固定UI
 - 複数ARGセッション管理
 - ページ固定表示との重なり回避
+- サイト側ショートカット案内パネルとの干渉回避
 - キーワードクリックコピー
 - 拡張機能内説明書
 - ローカル保存のみ
 
 ## 公開前チェックリスト
 
-- [ ] `dist/arg-scout-0.1.14.zip` をChrome Web Store Developer Dashboardへアップロード
+- [ ] `dist/arg-scout-0.1.15.zip` をChrome Web Store Developer Dashboardへアップロード
 - [ ] ストア説明、短い説明、カテゴリ、言語を入力
 - [ ] Privacy欄で単一用途と権限理由を入力
 - [ ] リモートコードは「使用していない」と申告
