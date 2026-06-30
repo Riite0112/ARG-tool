@@ -65,6 +65,15 @@
         return;
       }
 
+      if (message?.type === "ARG_SCOUT_GET_LAYOUT_STATE") {
+        sendResponse({
+          ok: true,
+          visible: isLayoutVisible(),
+          view: layoutView
+        });
+        return;
+      }
+
       if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
         showLayout({
           rememberSite: Boolean(message.rememberSite),
@@ -238,7 +247,7 @@
           <div class="help-body">
             <p>ARGごとにページ番号、到達キーワード、URLを手動で記録できます。</p>
             <ul>
-              <li>右上の拡張機能アイコンで表示メニューを開き、ページ、キーワード、両方表示、非表示を選びます。</li>
+              <li>右上の拡張機能アイコンで表示メニューを開き、ページとキーワードを個別に表示できます。</li>
               <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
               <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>

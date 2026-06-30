@@ -248,6 +248,7 @@ async function getPopupState(tab) {
   const currentEntry = session?.entries.find((entry) => entry.url === tab.url) || null;
   const keywordCount = (session?.keywords.primary.length || 0) + (session?.keywords.reserve.length || 0);
   const base = normalizeSiteBase(tab.url);
+  const layoutState = await getTabLayoutState(tab);
 
   return {
     savable: true,
@@ -255,12 +256,34 @@ async function getPopupState(tab) {
     site: readableSite(base),
     tracked: Boolean(session && isTrackedUrl(tab.url, session)),
     hidden: Boolean(session && isHiddenUrl(tab.url, session)),
+    visible: Boolean(layoutState.visible),
+    view: layoutState.visible ? normalizeLayoutView(layoutState.view) : "",
     sessionTitle: session?.sessionTitle || defaultSessionTitle(tab.url),
     pageCount: session?.entries.length || 0,
     keywordCount,
     targetPages: session?.targetPages || 0,
     currentPageNo: currentEntry?.pageNo || null
   };
+}
+
+async function getTabLayoutState(tab) {
+  if (!isSavableTab(tab) || tab.id == null) {
+    return { visible: false, view: "" };
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, { type: "ARG_SCOUT_GET_LAYOUT_STATE" });
+    if (response?.ok) {
+      return {
+        visible: Boolean(response.visible),
+        view: normalizeLayoutView(response.view)
+      };
+    }
+  } catch {
+    // The content script may not be available on the current page yet.
+  }
+
+  return { visible: false, view: "" };
 }
 
 function isSavableTab(tab) {

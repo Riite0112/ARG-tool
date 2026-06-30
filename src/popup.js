@@ -5,16 +5,18 @@ const viewLabels = {
 };
 
 const els = {};
+let selectedPanels = new Set();
 
 document.addEventListener("DOMContentLoaded", () => {
   for (const node of document.querySelectorAll("[id]")) {
     els[node.id] = node;
   }
 
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => openView(button.dataset.view));
+  document.querySelectorAll("[data-panel]").forEach((button) => {
+    button.addEventListener("click", () => togglePanel(button.dataset.panel));
   });
 
+  els.supportButton.addEventListener("click", showSupportPlaceholder);
   els.hideButton.addEventListener("click", hideTool);
   els.hideToolButton.addEventListener("click", hideTool);
   loadPopupState();
@@ -26,11 +28,28 @@ async function loadPopupState() {
     const response = await chrome.runtime.sendMessage({ type: "ARG_SCOUT_GET_POPUP_STATE" });
     if (!response?.ok) throw new Error(response?.error || "状態を取得できませんでした。");
     renderState(response);
-    setStatus(response.savable ? "表示したい項目を選択してください。" : "このページでは使用できません。", !response.savable);
+    setActiveView(response.visible ? response.view : "");
+    setStatus(response.savable ? "ページとキーワードを個別に選択できます。" : "このページでは使用できません。", !response.savable);
   } catch (error) {
     setStatus(error.message || "状態を取得できませんでした。", true);
     setDisabled(true);
   }
+}
+
+async function togglePanel(panel) {
+  const nextPanels = new Set(selectedPanels);
+  if (nextPanels.has(panel)) {
+    nextPanels.delete(panel);
+  } else {
+    nextPanels.add(panel);
+  }
+
+  if (!nextPanels.size) {
+    await hideTool();
+    return;
+  }
+
+  await openView(viewFromPanels(nextPanels));
 }
 
 async function openView(view) {
@@ -51,6 +70,10 @@ async function openView(view) {
   } finally {
     setBusy(false);
   }
+}
+
+function showSupportPlaceholder() {
+  setStatus("開発の応援項目は準備中です。公開後に案内先を追加できるようにしてあります。", false, true);
 }
 
 async function hideTool() {
@@ -82,7 +105,7 @@ function renderState(state) {
 }
 
 function setDisabled(disabled) {
-  document.querySelectorAll("button").forEach((button) => {
+  document.querySelectorAll("[data-panel], #hideButton, #hideToolButton").forEach((button) => {
     button.disabled = Boolean(disabled);
   });
 }
@@ -94,9 +117,28 @@ function setBusy(busy) {
 }
 
 function setActiveView(view) {
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.classList.toggle("active", button.dataset.view === view);
+  selectedPanels = panelsFromView(view);
+  document.querySelectorAll("[data-panel]").forEach((button) => {
+    const active = selectedPanels.has(button.dataset.panel);
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function panelsFromView(view) {
+  if (view === "all") return new Set(["pages", "keywords"]);
+  if (view === "pages") return new Set(["pages"]);
+  if (view === "keywords") return new Set(["keywords"]);
+  return new Set();
+}
+
+function viewFromPanels(panels) {
+  const hasPages = panels.has("pages");
+  const hasKeywords = panels.has("keywords");
+  if (hasPages && hasKeywords) return "all";
+  if (hasPages) return "pages";
+  if (hasKeywords) return "keywords";
+  return "";
 }
 
 function setStatus(text, isError = false, isOk = false) {
