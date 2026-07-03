@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ARG探索ツール",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "ARGやWeb謎解きのページ番号、到達キーワード、総ページ数をWebページ横の固定UIで管理する補助ツールです。",
   "icons": {
     "16": "icons/icon-16.png",

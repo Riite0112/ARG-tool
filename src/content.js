@@ -702,9 +702,26 @@
       return;
     }
 
-    pages.forEach((page) => {
+    pageRowsWithGaps(pages).forEach((page) => {
       const item = document.createElement("li");
       item.className = "page-row";
+      item.classList.toggle("missing", Boolean(page.missing));
+
+      if (page.missing) {
+        item.innerHTML = `
+          <div class="page-open page-missing" role="note" aria-label="${page.pageNo}ページ目は未到達">
+            <span class="page-no">${String(page.pageNo).padStart(2, "0")}</span>
+            <span class="page-main">
+              <span class="page-key">未到達のページ</span>
+              <span class="page-url">まだ発見・登録されていません</span>
+            </span>
+          </div>
+          <span class="page-delete-placeholder" aria-hidden="true"></span>
+        `;
+        els.pageList.append(item);
+        return;
+      }
+
       item.classList.toggle("current", page.url === location.href);
       if (page.url === location.href) {
         currentItem = item;
@@ -747,6 +764,30 @@
         });
       });
     }
+  }
+
+  function pageRowsWithGaps(pages) {
+    const rows = [];
+    let previousPageNo = null;
+
+    pages.forEach((page) => {
+      const pageNo = parsePositiveInt(page.pageNo);
+      if (!pageNo) return;
+
+      if (previousPageNo !== null) {
+        for (let missingNo = previousPageNo + 1; missingNo < pageNo; missingNo += 1) {
+          rows.push({
+            missing: true,
+            pageNo: missingNo
+          });
+        }
+      }
+
+      rows.push(page);
+      previousPageNo = Math.max(previousPageNo, pageNo);
+    });
+
+    return rows;
   }
 
   function renderKeywords() {
@@ -1532,6 +1573,27 @@
       .page-open:hover,
       .page-row.current .page-open {
         background: rgba(19, 209, 156, 0.09);
+      }
+
+      .page-row.missing .page-open {
+        cursor: default;
+      }
+
+      .page-row.missing .page-open:hover {
+        background: transparent;
+      }
+
+      .page-row.missing .page-no,
+      .page-row.missing .page-key {
+        color: #ff6f91;
+      }
+
+      .page-row.missing .page-url {
+        color: rgba(255, 111, 145, 0.66);
+      }
+
+      .page-delete-placeholder {
+        border-left: 1px solid rgba(72, 95, 127, 0.28);
       }
 
       .page-delete {
