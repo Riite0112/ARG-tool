@@ -209,6 +209,8 @@ async function forceHideLayout(tab) {
           node.removeAttribute("data-arg-scout-shortcut-panel");
         });
         document.documentElement.classList.remove("arg-scout-layout-active");
+        document.documentElement.style.removeProperty("--arg-scout-body-padding-bottom");
+        document.documentElement.style.removeProperty("--arg-scout-extra-bottom");
         document.getElementById("arg-scout-layout-style")?.remove();
       }
     });

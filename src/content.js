@@ -15,6 +15,8 @@
   const FIXED_TRANSFORM_ATTR = "data-arg-scout-fixed-transform";
   const SHORTCUT_PANEL_ATTR = "data-arg-scout-shortcut-panel";
   const SHORTCUT_STYLE_ATTR = "data-arg-scout-shortcut-style";
+  const EXTRA_BOTTOM_VAR = "--arg-scout-extra-bottom";
+  const BODY_PADDING_BOTTOM_VAR = "--arg-scout-body-padding-bottom";
   const STATE_VERSION = 7;
   const DEFAULT_LAYOUT_VIEW = "all";
   const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
@@ -55,6 +57,7 @@
   let els = {};
   let fixedElementObserver = null;
   let fixedElementFrame = 0;
+  let originalBodyPaddingBottom = null;
 
   if (canUseExtensionApi) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -305,6 +308,7 @@
   }
 
   function applyPageLayout() {
+    captureOriginalBodySpacing();
     document.documentElement.classList.add(ROOT_CLASS);
     const usesSidePanel = layoutView !== "keywords";
     const usesBottomBar = layoutView !== "pages";
@@ -321,18 +325,29 @@
     }
 
     style.textContent = `
+      html.${ROOT_CLASS} {
+        scroll-padding-bottom: calc(${bottomHeight}px + var(${EXTRA_BOTTOM_VAR}, 0px)) !important;
+      }
       html.${ROOT_CLASS} body {
         box-sizing: border-box !important;
         margin-left: ${leftWidth}px !important;
-        margin-bottom: ${bottomHeight}px !important;
+        margin-bottom: 0 !important;
         max-width: calc(100vw - ${leftWidth}px) !important;
         min-height: calc(100vh - ${bottomHeight}px) !important;
+        padding-bottom: calc(var(${BODY_PADDING_BOTTOM_VAR}, 0px) + ${bottomHeight}px + var(${EXTRA_BOTTOM_VAR}, 0px)) !important;
+        scroll-padding-bottom: calc(${bottomHeight}px + var(${EXTRA_BOTTOM_VAR}, 0px)) !important;
       }
       @media (max-width: 760px) {
+        html.${ROOT_CLASS} {
+          scroll-padding-bottom: calc(${compactBottomHeight}px + var(${EXTRA_BOTTOM_VAR}, 0px)) !important;
+        }
         html.${ROOT_CLASS} body {
           margin-left: ${compactLeftWidth}px !important;
           max-width: calc(100vw - ${compactLeftWidth}px) !important;
-          margin-bottom: ${compactBottomHeight}px !important;
+          margin-bottom: 0 !important;
+          min-height: calc(100vh - ${compactBottomHeight}px) !important;
+          padding-bottom: calc(var(${BODY_PADDING_BOTTOM_VAR}, 0px) + ${compactBottomHeight}px + var(${EXTRA_BOTTOM_VAR}, 0px)) !important;
+          scroll-padding-bottom: calc(${compactBottomHeight}px + var(${EXTRA_BOTTOM_VAR}, 0px)) !important;
         }
       }
     `;
@@ -346,6 +361,22 @@
     restorePageShortcutPanels();
     document.documentElement.classList.remove(ROOT_CLASS);
     document.getElementById(LAYOUT_STYLE_ID)?.remove();
+    clearPageScrollSpace();
+  }
+
+  function captureOriginalBodySpacing() {
+    if (!document.body) return;
+    if (originalBodyPaddingBottom !== null) return;
+
+    originalBodyPaddingBottom = Math.max(0, parsePixelValue(getComputedStyle(document.body).paddingBottom) || 0);
+    document.documentElement.style.setProperty(BODY_PADDING_BOTTOM_VAR, `${originalBodyPaddingBottom}px`);
+    document.documentElement.style.setProperty(EXTRA_BOTTOM_VAR, "0px");
+  }
+
+  function clearPageScrollSpace() {
+    originalBodyPaddingBottom = null;
+    document.documentElement.style.removeProperty(BODY_PADDING_BOTTOM_VAR);
+    document.documentElement.style.removeProperty(EXTRA_BOTTOM_VAR);
   }
 
   function startFixedElementProtection() {
@@ -390,11 +421,19 @@
     const candidates = [...document.body.querySelectorAll("*")];
     suppressShortcutHelpPanels(candidates);
 
+    let extraBottom = 0;
     candidates.forEach((node) => {
       const protection = getFixedElementProtection(node, metrics);
       if (!protection) return;
+      extraBottom = Math.max(extraBottom, protection.scrollGap || 0);
       offsetFixedElement(node, protection);
     });
+    updatePageScrollSpace(metrics.bottom ? extraBottom : 0);
+  }
+
+  function updatePageScrollSpace(extraBottom) {
+    const safeExtraBottom = Math.max(0, Math.ceil(extraBottom || 0));
+    document.documentElement.style.setProperty(EXTRA_BOTTOM_VAR, `${safeExtraBottom}px`);
   }
 
   function suppressShortcutHelpPanels(candidates) {
@@ -515,7 +554,8 @@
       const computedBottom = parsePixelValue(style.bottom);
       return {
         bottom: computedBottom !== null ? computedBottom + metrics.bottom + 12 : null,
-        transformY: computedBottom === null ? -(metrics.bottom + 12) : null
+        transformY: computedBottom === null ? -(metrics.bottom + 12) : null,
+        scrollGap: fixedBottomScrollGap(rect, computedBottom, metrics)
       };
     }
 
@@ -533,6 +573,19 @@
     }
 
     return false;
+  }
+
+  function fixedBottomScrollGap(rect, computedBottom, metrics) {
+    if (!metrics.bottom) return 0;
+
+    const wideEnough = rect.width >= Math.min(520, window.innerWidth * 0.45);
+    const spansReadableArea = rect.left < window.innerWidth * 0.35 && rect.right > window.innerWidth * 0.55;
+    if (!wideEnough && !spansReadableArea) return 0;
+
+    const existingBottom = computedBottom !== null
+      ? Math.max(0, computedBottom)
+      : Math.max(0, window.innerHeight - rect.bottom);
+    return Math.ceil(rect.height + existingBottom + 16);
   }
 
   function offsetFixedElement(node, protection) {
