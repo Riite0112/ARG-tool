@@ -563,11 +563,15 @@
     if (PROTECTED_TAGS.has(node.localName)) return false;
 
     const style = getComputedStyle(node);
-    if (style.position !== "fixed") return false;
     if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
 
     const rect = node.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return false;
+
+    const viewportAppProtection = getViewportAppProtection(node, style, rect, metrics);
+    if (viewportAppProtection) return viewportAppProtection;
+
+    if (style.position !== "fixed") return false;
 
     const overlapsBottomTool = rect.bottom > window.innerHeight - metrics.bottom - 4;
     const overlapsLeftTool = rect.left < metrics.left + 4;
@@ -609,6 +613,44 @@
     return false;
   }
 
+  function getViewportAppProtection(node, style, rect, metrics) {
+    if (!metrics.bottom) return false;
+    if (node.parentElement !== document.body) return false;
+    if (["fixed", "absolute", "sticky"].includes(style.position)) return false;
+    if (rect.top > 12) return false;
+    if (rect.height < window.innerHeight * 0.72) return false;
+    if (rect.bottom < window.innerHeight - metrics.bottom + 24) return false;
+
+    const locksViewport = ["hidden", "clip", "auto", "scroll"].some((value) => {
+      return style.overflow === value || style.overflowY === value;
+    });
+    const isAppLikeLayout = ["flex", "grid"].includes(style.display);
+    if (!locksViewport && !isAppLikeLayout) return false;
+    if (!hasBottomInteractiveControl(node, metrics)) return false;
+
+    const height = `calc(100dvh - ${metrics.bottom}px)`;
+    return {
+      height,
+      minHeight: height,
+      maxHeight: height
+    };
+  }
+
+  function hasBottomInteractiveControl(node, metrics) {
+    const bottomEdge = window.innerHeight - metrics.bottom;
+    const controls = node.querySelectorAll(
+      "input:not([type='hidden']), textarea, button, select, [contenteditable='true'], [role='textbox']"
+    );
+
+    return [...controls].some((control) => {
+      if (!(control instanceof HTMLElement)) return false;
+      const style = getComputedStyle(control);
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      const rect = control.getBoundingClientRect();
+      return rect.width >= 24 && rect.height >= 18 && rect.bottom > bottomEdge - 24;
+    });
+  }
+
   function fixedBottomScrollGap(rect, computedBottom, metrics) {
     if (!metrics.bottom) return 0;
 
@@ -640,6 +682,18 @@
       node.style.setProperty("width", protection.width, "important");
       node.style.setProperty("max-width", protection.width, "important");
       node.style.setProperty("box-sizing", "border-box", "important");
+    }
+
+    if (protection.height) {
+      node.style.setProperty("height", protection.height, "important");
+    }
+
+    if (protection.minHeight) {
+      node.style.setProperty("min-height", protection.minHeight, "important");
+    }
+
+    if (protection.maxHeight) {
+      node.style.setProperty("max-height", protection.maxHeight, "important");
     }
 
     if (typeof protection.transformY === "number") {
