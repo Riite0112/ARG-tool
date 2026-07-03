@@ -212,6 +212,7 @@ async function forceHideLayout(tab) {
         document.documentElement.style.removeProperty("--arg-scout-body-padding-bottom");
         document.documentElement.style.removeProperty("--arg-scout-extra-bottom");
         document.getElementById("arg-scout-layout-style")?.remove();
+        document.getElementById("arg-scout-scroll-spacer")?.remove();
       }
     });
   } catch {

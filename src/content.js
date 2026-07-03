@@ -8,6 +8,7 @@
   const MANUAL_SOURCE = "manual-entry";
   const DEFAULT_SESSION_TITLE = "ARG探索メモ";
   const LAYOUT_STYLE_ID = "arg-scout-layout-style";
+  const SCROLL_SPACER_ID = "arg-scout-scroll-spacer";
   const ROOT_CLASS = "arg-scout-layout-active";
   const FIXED_OFFSET_ATTR = "data-arg-scout-fixed-offset";
   const FIXED_STYLE_ATTR = "data-arg-scout-fixed-style";
@@ -361,6 +362,7 @@
     restorePageShortcutPanels();
     document.documentElement.classList.remove(ROOT_CLASS);
     document.getElementById(LAYOUT_STYLE_ID)?.remove();
+    document.getElementById(SCROLL_SPACER_ID)?.remove();
     clearPageScrollSpace();
   }
 
@@ -428,12 +430,44 @@
       extraBottom = Math.max(extraBottom, protection.scrollGap || 0);
       offsetFixedElement(node, protection);
     });
-    updatePageScrollSpace(metrics.bottom ? extraBottom : 0);
+    updatePageScrollSpace(metrics.bottom, metrics.bottom ? extraBottom : 0);
   }
 
-  function updatePageScrollSpace(extraBottom) {
+  function updatePageScrollSpace(toolBottom, extraBottom) {
+    const safeToolBottom = Math.max(0, Math.ceil(toolBottom || 0));
     const safeExtraBottom = Math.max(0, Math.ceil(extraBottom || 0));
     document.documentElement.style.setProperty(EXTRA_BOTTOM_VAR, `${safeExtraBottom}px`);
+    updatePageScrollSpacer(safeToolBottom + safeExtraBottom);
+  }
+
+  function updatePageScrollSpacer(height) {
+    if (!document.body) return;
+
+    const safeHeight = Math.max(0, Math.ceil(height || 0));
+    let spacer = document.getElementById(SCROLL_SPACER_ID);
+
+    if (!safeHeight) {
+      spacer?.remove();
+      return;
+    }
+
+    if (!spacer) {
+      spacer = document.createElement("div");
+      spacer.id = SCROLL_SPACER_ID;
+      spacer.setAttribute("aria-hidden", "true");
+      document.body.append(spacer);
+    }
+
+    if (spacer.dataset.argScoutHeight === String(safeHeight)) return;
+
+    spacer.style.setProperty("display", "block", "important");
+    spacer.style.setProperty("clear", "both", "important");
+    spacer.style.setProperty("width", "1px", "important");
+    spacer.style.setProperty("height", `${safeHeight}px`, "important");
+    spacer.style.setProperty("min-height", `${safeHeight}px`, "important");
+    spacer.style.setProperty("pointer-events", "none", "important");
+    spacer.style.setProperty("visibility", "hidden", "important");
+    spacer.dataset.argScoutHeight = String(safeHeight);
   }
 
   function suppressShortcutHelpPanels(candidates) {
