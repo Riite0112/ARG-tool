@@ -13,6 +13,7 @@ const themeLabels = {
 
 const DEFAULT_THEME = "emerald";
 const THEMES = new Set(Object.keys(themeLabels));
+const FEEDBACK_FORM_URL = String(globalThis.ARG_SCOUT_CONFIG?.feedbackFormUrl || "").trim();
 const els = {};
 const encodingMaps = new Map();
 let selectedPanels = new Set();
@@ -108,7 +109,19 @@ async function openView(view) {
 }
 
 function showSupportPlaceholder() {
-  setStatus("開発の応援項目は準備中です。公開後に案内先を追加できるようにしてあります。", false, true);
+  if (!FEEDBACK_FORM_URL) {
+    setStatus("フィードバックフォームは準備中です。src/config.js にGoogleフォームURLを入れると開けるようになります。", false, true);
+    return;
+  }
+
+  try {
+    const url = new URL(FEEDBACK_FORM_URL);
+    if (!/^https?:$/.test(url.protocol)) throw new Error("Invalid feedback URL");
+    chrome.tabs.create({ url: url.href });
+    setStatus("フィードバックフォームを開きました。", false, true);
+  } catch {
+    setStatus("フィードバックフォームURLの形式を確認してください。", true);
+  }
 }
 
 async function hideTool() {
