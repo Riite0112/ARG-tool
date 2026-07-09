@@ -1457,7 +1457,7 @@
   }
 
   function formatPageLabel(page) {
-    const pageNo = String(page.pageNo || "").padStart(2, "0");
+    const pageNo = String(page.pageNo || "");
     const branch = normalizePageBranch(page.pageBranch);
     return branch ? `${pageNo}-${branch}` : pageNo;
   }
@@ -1495,12 +1495,30 @@
   }
 
   function suggestNextPageNo() {
-    const used = new Set(savedPages().map((page) => page.pageNo));
-    const target = parsePositiveInt(state.targetPages) || Math.max(used.size + 1, 1);
-    for (let pageNo = 1; pageNo <= target + 1; pageNo += 1) {
+    const pages = savedPages();
+    const used = new Set(pages.map((page) => page.pageNo));
+    const latest = latestRegisteredPage(pages);
+    const start = latest ? latest.pageNo + 1 : 1;
+    const maxUsed = pages.reduce((max, page) => Math.max(max, page.pageNo || 0), 0);
+    const target = parsePositiveInt(state.targetPages) || Math.max(maxUsed, start, 1);
+
+    for (let pageNo = start; pageNo <= target + 1; pageNo += 1) {
       if (!used.has(pageNo)) return pageNo;
     }
-    return used.size + 1;
+    return Math.max(maxUsed + 1, start);
+  }
+
+  function latestRegisteredPage(pages) {
+    return [...pages]
+      .filter((page) => parsePositiveInt(page.pageNo))
+      .sort((a, b) => entryTimestamp(b) - entryTimestamp(a))[0] || null;
+  }
+
+  function entryTimestamp(entry) {
+    const updated = Date.parse(entry.updatedAt || "");
+    if (Number.isFinite(updated)) return updated;
+    const created = Date.parse(entry.createdAt || "");
+    return Number.isFinite(created) ? created : 0;
   }
 
   function parsePositiveInt(value) {
