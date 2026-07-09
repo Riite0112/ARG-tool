@@ -1,7 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 9;
+const STATE_VERSION = 10;
 const DEFAULT_LAYOUT_VIEW = "all";
 const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
 const DEFAULT_THEME = "emerald";
@@ -88,6 +88,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ARG_SCOUT_SET_AUTO_STASH_COPY") {
+    setAutoStashCopy(message.enabled)
+      .then((state) => sendResponse({ ok: true, ...state }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message?.type === "ARG_SCOUT_TOGGLE_TIMER") {
     toggleActiveTimer()
       .then((state) => sendResponse({ ok: true, ...state }))
@@ -167,6 +174,22 @@ async function setActiveTheme(theme) {
   store.activeSessionId = session.id;
   addTrackedSiteFromUrl(session, tab.url);
   session.theme = normalizeTheme(theme);
+  session.updatedAt = new Date().toISOString();
+  await saveState(store);
+  return getPopupState(tab);
+}
+
+async function setAutoStashCopy(enabled) {
+  const tab = await getActiveTab();
+  if (!isSavableTab(tab)) {
+    return { savable: false };
+  }
+
+  const store = await loadState();
+  const session = resolveSessionForUrl(store, tab.url, { create: true });
+  store.activeSessionId = session.id;
+  addTrackedSiteFromUrl(session, tab.url);
+  session.autoStashCopy = Boolean(enabled);
   session.updatedAt = new Date().toISOString();
   await saveState(store);
   return getPopupState(tab);
@@ -357,6 +380,7 @@ async function getPopupState(tab) {
     view: layoutState.visible ? normalizeLayoutView(layoutState.view) : "",
     sessionTitle: session?.sessionTitle || defaultSessionTitle(tab.url),
     theme: session?.theme || DEFAULT_THEME,
+    autoStashCopy: Boolean(session?.autoStashCopy),
     pageCount: session?.entries.length || 0,
     keywordCount,
     targetPages: session?.targetPages || 0,
@@ -447,6 +471,7 @@ function sanitizeSession(raw) {
     id: String(raw?.id || crypto.randomUUID()),
     sessionTitle: "ARG探索メモ",
     theme: DEFAULT_THEME,
+    autoStashCopy: false,
     targetPages: 0,
     trackedSites: [],
     hiddenSites: [],
@@ -471,6 +496,7 @@ function sanitizeSession(raw) {
     ? raw.sessionTitle
     : state.sessionTitle;
   state.theme = normalizeTheme(raw.theme);
+  state.autoStashCopy = Boolean(raw.autoStashCopy);
   state.targetPages = parsePositiveInt(raw.targetPages) || 0;
   state.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
   state.trackedSites = sanitizeTrackedSites(raw.trackedSites);
@@ -490,6 +516,7 @@ function hasSessionData(session) {
     session.keywords.reserve.length ||
     session.trackedSites.length ||
     session.targetPages ||
+    session.autoStashCopy ||
     timerWasStarted(session.timer)
   );
 }

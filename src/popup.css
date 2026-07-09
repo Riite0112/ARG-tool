@@ -263,6 +263,59 @@ button {
   opacity: 0.48;
 }
 
+.copy-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(77, 101, 136, 0.68);
+  border-radius: 6px;
+  background: rgba(5, 10, 22, 0.78);
+  padding: 8px;
+}
+
+.copy-card div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.copy-card small {
+  color: #9daabe;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.copy-card strong {
+  overflow: hidden;
+  color: #f7fffb;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-card button {
+  min-height: 30px;
+  border: 1px solid rgba(77, 101, 136, 0.9);
+  border-radius: 6px;
+  background: rgba(8, 14, 27, 0.72);
+  color: #cfe2f2;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.copy-card button:hover,
+.copy-card button.active {
+  border-color: rgba(var(--popup-accent-rgb), 0.78);
+  color: var(--popup-accent);
+}
+
+.copy-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .tool-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

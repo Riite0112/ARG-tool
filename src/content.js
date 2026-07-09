@@ -18,7 +18,7 @@
   const SHORTCUT_STYLE_ATTR = "data-arg-scout-shortcut-style";
   const EXTRA_BOTTOM_VAR = "--arg-scout-extra-bottom";
   const BODY_PADDING_BOTTOM_VAR = "--arg-scout-body-padding-bottom";
-  const STATE_VERSION = 9;
+  const STATE_VERSION = 10;
   const DEFAULT_LAYOUT_VIEW = "all";
   const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
   const DEFAULT_THEME = "emerald";
@@ -42,6 +42,7 @@
     id: "",
     sessionTitle: DEFAULT_SESSION_TITLE,
     theme: DEFAULT_THEME,
+    autoStashCopy: false,
     targetPages: 0,
     trackedSites: [],
     hiddenSites: [],
@@ -69,6 +70,8 @@
   let originalBodyPaddingBottom = null;
 
   if (canUseExtensionApi) {
+    document.addEventListener("copy", handleCopyEvent, true);
+
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (message?.type === "ARG_SCOUT_GET_SELECTION") {
         sendResponse({
@@ -265,6 +268,7 @@
               <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
               <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
               <li>拡張機能メニューの <strong>TIMER</strong> を開始すると、ページ保存時の経過時間がページ一覧に記録されます。</li>
+              <li>拡張機能メニューの <strong>COPY</strong> をONにすると、ページ上でコピーした文字をキーワードへ一時保存します。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
               <li>下のキーワードはクリックでコピー、<strong>×</strong> で削除します。</li>
               <li>ページ右下のファイル番号などは、下バーに隠れないよう自動で上へ退避します。</li>
@@ -1011,6 +1015,52 @@
     }
   }
 
+  async function handleCopyEvent(event) {
+    if (isCopyFromTool(event)) return;
+
+    const text = copiedTextFromEvent(event);
+    if (!text) return;
+
+    try {
+      await loadState({ create: false });
+      if (!state.autoStashCopy || !isTrackedUrl(location.href) || isHiddenUrl(location.href)) return;
+
+      const added = addKeywordToState("primary", text);
+      if (!added) return;
+
+      await saveState();
+      if (layout && isLayoutVisible()) {
+        renderKeywords();
+        setSaveStatus("コピーを一時保存しました", false);
+      }
+    } catch {
+      // Copying should never be blocked by the helper.
+    }
+  }
+
+  function copiedTextFromEvent(event) {
+    const clipboardText = event.clipboardData?.getData("text/plain")?.trim();
+    if (clipboardText) return clipboardText;
+
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      const start = active.selectionStart;
+      const end = active.selectionEnd;
+      if (Number.isInteger(start) && Number.isInteger(end) && end > start) {
+        return active.value.slice(start, end).trim();
+      }
+    }
+
+    return getSelectionText();
+  }
+
+  function isCopyFromTool(event) {
+    if (!layout?.host) return false;
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    if (path.includes(layout.host)) return true;
+    return event.target instanceof Element && Boolean(event.target.closest("arg-scout-layout"));
+  }
+
   function fallbackCopyText(text) {
     const textarea = document.createElement("textarea");
     textarea.value = text;
@@ -1217,6 +1267,7 @@
     next.version = STATE_VERSION;
     next.id = String(raw.id || crypto.randomUUID());
     next.theme = normalizeTheme(raw.theme);
+    next.autoStashCopy = Boolean(raw.autoStashCopy);
     next.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
       ? raw.sessionTitle
       : defaultSessionTitle(raw.trackedSites?.[0] || raw.entries?.[0]?.url || location.href);
@@ -1338,6 +1389,7 @@
       session.keywords.reserve.length ||
       session.trackedSites.length ||
       session.targetPages ||
+      session.autoStashCopy ||
       timerWasStarted(session.timer)
     );
   }
@@ -1369,17 +1421,18 @@
   function addKeywordToState(bucket, text) {
     const target = bucket === "reserve" ? "reserve" : "primary";
     const normalized = text.trim();
-    if (!normalized) return;
+    if (!normalized) return false;
 
     const exists = [...state.keywords.primary, ...state.keywords.reserve]
       .some((keyword) => keyword.text.toLowerCase() === normalized.toLowerCase());
-    if (exists) return;
+    if (exists) return false;
 
     state.keywords[target].push({
       id: crypto.randomUUID(),
       text: normalized,
       createdAt: new Date().toISOString()
     });
+    return true;
   }
 
   async function deleteKeyword(bucket, id) {

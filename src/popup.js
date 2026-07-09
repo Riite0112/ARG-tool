@@ -20,6 +20,7 @@ let timerState = {
   running: false,
   started: false
 };
+let autoStashCopy = false;
 let timerTicker = 0;
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -40,6 +41,7 @@ document.addEventListener("DOMContentLoaded", () => {
   els.hideToolButton.addEventListener("click", hideTool);
   els.timerToggleButton.addEventListener("click", toggleTimer);
   els.timerResetButton.addEventListener("click", resetTimer);
+  els.autoCopyButton.addEventListener("click", toggleAutoStashCopy);
   loadPopupState();
 });
 
@@ -123,6 +125,7 @@ function renderState(state) {
   els.trackedState.textContent = state.hidden ? "非表示" : state.tracked ? "表示中" : "未登録";
   els.trackedState.classList.toggle("hidden", Boolean(state.hidden));
   renderThemeState(state.theme || DEFAULT_THEME);
+  renderAutoStashCopyState(Boolean(state.autoStashCopy));
   renderTimerState(state);
   setDisabled(!state.savable);
 }
@@ -183,6 +186,36 @@ async function setTheme(theme) {
   }
 }
 
+async function toggleAutoStashCopy() {
+  const previous = autoStashCopy;
+  const next = !previous;
+  renderAutoStashCopyState(next);
+  setBusy(true);
+  setStatus(next ? "コピー自動保存をONにしています。" : "コピー自動保存をOFFにしています。");
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "ARG_SCOUT_SET_AUTO_STASH_COPY",
+      enabled: next
+    });
+    if (!response?.ok) throw new Error(response?.error || "コピー自動保存を変更できませんでした。");
+    renderState(response);
+    setActiveView(response.visible ? response.view : "");
+    setStatus(
+      response.autoStashCopy
+        ? "コピーした文字を一時保存します。"
+        : "コピー自動保存をOFFにしました。",
+      false,
+      true
+    );
+  } catch (error) {
+    renderAutoStashCopyState(previous);
+    setStatus(error.message || "コピー自動保存を変更できませんでした。", true);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function resetTimer() {
   if (!timerState.started) return;
   if (!confirm("タイマーをリセットしますか？\n保存済みページに記録された時間は残ります。")) return;
@@ -204,7 +237,7 @@ async function resetTimer() {
 }
 
 function setDisabled(disabled) {
-  document.querySelectorAll("[data-panel], [data-theme], #hideButton, #hideToolButton, #timerToggleButton, #timerResetButton").forEach((button) => {
+  document.querySelectorAll("[data-panel], [data-theme], #hideButton, #hideToolButton, #timerToggleButton, #timerResetButton, #autoCopyButton").forEach((button) => {
     button.disabled = Boolean(disabled);
   });
   if (!disabled) {
@@ -238,6 +271,13 @@ function renderThemeState(theme) {
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
   });
+}
+
+function renderAutoStashCopyState(enabled) {
+  autoStashCopy = Boolean(enabled);
+  els.autoCopyButton.textContent = autoStashCopy ? "ON" : "OFF";
+  els.autoCopyButton.classList.toggle("active", autoStashCopy);
+  els.autoCopyButton.setAttribute("aria-pressed", String(autoStashCopy));
 }
 
 function panelsFromView(view) {
