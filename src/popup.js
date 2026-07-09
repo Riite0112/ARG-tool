@@ -4,6 +4,15 @@ const viewLabels = {
   keywords: "下側にキーワードバーを表示しました。"
 };
 
+const themeLabels = {
+  emerald: "緑",
+  aqua: "青",
+  violet: "紫",
+  slate: "灰"
+};
+
+const DEFAULT_THEME = "emerald";
+const THEMES = new Set(Object.keys(themeLabels));
 const els = {};
 let selectedPanels = new Set();
 let timerState = {
@@ -20,6 +29,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll("[data-panel]").forEach((button) => {
     button.addEventListener("click", () => togglePanel(button.dataset.panel));
+  });
+
+  document.querySelectorAll("[data-theme]").forEach((button) => {
+    button.addEventListener("click", () => setTheme(button.dataset.theme));
   });
 
   els.supportButton.addEventListener("click", showSupportPlaceholder);
@@ -109,6 +122,7 @@ function renderState(state) {
   els.targetPages.textContent = state.targetPages ? String(state.targetPages) : "-";
   els.trackedState.textContent = state.hidden ? "非表示" : state.tracked ? "表示中" : "未登録";
   els.trackedState.classList.toggle("hidden", Boolean(state.hidden));
+  renderThemeState(state.theme || DEFAULT_THEME);
   renderTimerState(state);
   setDisabled(!state.savable);
 }
@@ -147,6 +161,28 @@ async function toggleTimer() {
   }
 }
 
+async function setTheme(theme) {
+  const normalized = normalizeTheme(theme);
+  renderThemeState(normalized);
+  setBusy(true);
+  setStatus("テーマを切り替えています。");
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: "ARG_SCOUT_SET_THEME",
+      theme: normalized
+    });
+    if (!response?.ok) throw new Error(response?.error || "テーマを変更できませんでした。");
+    renderState(response);
+    setActiveView(response.visible ? response.view : "");
+    setStatus(`テーマを${themeLabels[normalized]}にしました。`, false, true);
+  } catch (error) {
+    setStatus(error.message || "テーマを変更できませんでした。", true);
+  } finally {
+    setBusy(false);
+  }
+}
+
 async function resetTimer() {
   if (!timerState.started) return;
   if (!confirm("タイマーをリセットしますか？\n保存済みページに記録された時間は残ります。")) return;
@@ -168,7 +204,7 @@ async function resetTimer() {
 }
 
 function setDisabled(disabled) {
-  document.querySelectorAll("[data-panel], #hideButton, #hideToolButton, #timerToggleButton, #timerResetButton").forEach((button) => {
+  document.querySelectorAll("[data-panel], [data-theme], #hideButton, #hideToolButton, #timerToggleButton, #timerResetButton").forEach((button) => {
     button.disabled = Boolean(disabled);
   });
   if (!disabled) {
@@ -194,6 +230,16 @@ function setActiveView(view) {
   });
 }
 
+function renderThemeState(theme) {
+  const normalized = normalizeTheme(theme);
+  document.body.dataset.theme = normalized;
+  document.querySelectorAll("[data-theme]").forEach((button) => {
+    const active = button.dataset.theme === normalized;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
 function panelsFromView(view) {
   if (view === "all") return new Set(["pages", "keywords"]);
   if (view === "pages") return new Set(["pages"]);
@@ -214,6 +260,11 @@ function setStatus(text, isError = false, isOk = false) {
   els.statusText.textContent = text;
   els.statusText.classList.toggle("error", Boolean(isError));
   els.statusText.classList.toggle("ok", Boolean(isOk) && !isError);
+}
+
+function normalizeTheme(value) {
+  const normalized = String(value || DEFAULT_THEME);
+  return THEMES.has(normalized) ? normalized : DEFAULT_THEME;
 }
 
 function syncTimerTicker() {

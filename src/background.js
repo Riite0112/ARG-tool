@@ -1,9 +1,11 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 8;
+const STATE_VERSION = 9;
 const DEFAULT_LAYOUT_VIEW = "all";
 const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
+const DEFAULT_THEME = "emerald";
+const THEMES = new Set(["emerald", "aqua", "violet", "slate"]);
 
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.contextMenus.create({
@@ -79,6 +81,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ARG_SCOUT_SET_THEME") {
+    setActiveTheme(message.theme)
+      .then((state) => sendResponse({ ok: true, ...state }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message?.type === "ARG_SCOUT_TOGGLE_TIMER") {
     toggleActiveTimer()
       .then((state) => sendResponse({ ok: true, ...state }))
@@ -142,6 +151,22 @@ async function toggleActiveTimer() {
     session.timer.startedOnce = true;
   }
 
+  session.updatedAt = new Date().toISOString();
+  await saveState(store);
+  return getPopupState(tab);
+}
+
+async function setActiveTheme(theme) {
+  const tab = await getActiveTab();
+  if (!isSavableTab(tab)) {
+    return { savable: false };
+  }
+
+  const store = await loadState();
+  const session = resolveSessionForUrl(store, tab.url, { create: true });
+  store.activeSessionId = session.id;
+  addTrackedSiteFromUrl(session, tab.url);
+  session.theme = normalizeTheme(theme);
   session.updatedAt = new Date().toISOString();
   await saveState(store);
   return getPopupState(tab);
@@ -331,6 +356,7 @@ async function getPopupState(tab) {
     visible: Boolean(layoutState.visible),
     view: layoutState.visible ? normalizeLayoutView(layoutState.view) : "",
     sessionTitle: session?.sessionTitle || defaultSessionTitle(tab.url),
+    theme: session?.theme || DEFAULT_THEME,
     pageCount: session?.entries.length || 0,
     keywordCount,
     targetPages: session?.targetPages || 0,
@@ -369,6 +395,11 @@ function isSavableTab(tab) {
 function normalizeLayoutView(view) {
   const normalized = String(view || DEFAULT_LAYOUT_VIEW);
   return LAYOUT_VIEWS.has(normalized) ? normalized : DEFAULT_LAYOUT_VIEW;
+}
+
+function normalizeTheme(value) {
+  const normalized = String(value || DEFAULT_THEME);
+  return THEMES.has(normalized) ? normalized : DEFAULT_THEME;
 }
 
 async function loadState() {
@@ -415,6 +446,7 @@ function sanitizeSession(raw) {
     version: STATE_VERSION,
     id: String(raw?.id || crypto.randomUUID()),
     sessionTitle: "ARG探索メモ",
+    theme: DEFAULT_THEME,
     targetPages: 0,
     trackedSites: [],
     hiddenSites: [],
@@ -438,6 +470,7 @@ function sanitizeSession(raw) {
   state.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
     ? raw.sessionTitle
     : state.sessionTitle;
+  state.theme = normalizeTheme(raw.theme);
   state.targetPages = parsePositiveInt(raw.targetPages) || 0;
   state.entries = Array.isArray(raw.entries) ? raw.entries.map(sanitizeEntry).filter(Boolean) : [];
   state.trackedSites = sanitizeTrackedSites(raw.trackedSites);

@@ -18,9 +18,11 @@
   const SHORTCUT_STYLE_ATTR = "data-arg-scout-shortcut-style";
   const EXTRA_BOTTOM_VAR = "--arg-scout-extra-bottom";
   const BODY_PADDING_BOTTOM_VAR = "--arg-scout-body-padding-bottom";
-  const STATE_VERSION = 8;
+  const STATE_VERSION = 9;
   const DEFAULT_LAYOUT_VIEW = "all";
   const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
+  const DEFAULT_THEME = "emerald";
+  const THEMES = new Set(["emerald", "aqua", "violet", "slate"]);
   const LEFT_WIDTH = 260;
   const BOTTOM_HEIGHT = 190;
   const COMPACT_LEFT_WIDTH = 217;
@@ -39,6 +41,7 @@
     version: STATE_VERSION,
     id: "",
     sessionTitle: DEFAULT_SESSION_TITLE,
+    theme: DEFAULT_THEME,
     targetPages: 0,
     trackedSites: [],
     hiddenSites: [],
@@ -196,7 +199,7 @@
     const shadow = host.attachShadow({ mode: "open" });
     shadow.innerHTML = `
       <style>${layoutStyles()}</style>
-      <div class="layout-root" data-view="${layoutView}" aria-live="polite">
+      <div class="layout-root" data-view="${layoutView}" data-theme="${normalizeTheme(state.theme)}" aria-live="polite">
         <aside class="side-panel">
           <header class="side-brand">
             <div class="brand-row">
@@ -729,6 +732,7 @@
 
   function renderAll() {
     if (!layout) return;
+    renderTheme();
     renderSession();
     renderPages();
     renderKeywords();
@@ -747,6 +751,10 @@
     els.sessionSelect.value = state.id;
     els.sessionTitleInput.value = state.sessionTitle || DEFAULT_SESSION_TITLE;
     els.sessionSite.textContent = normalizeSiteBase(location.href).replace(/^https?:\/\//, "");
+  }
+
+  function renderTheme() {
+    layout?.shadow.querySelector(".layout-root")?.setAttribute("data-theme", normalizeTheme(state.theme));
   }
 
   function renderPages() {
@@ -1208,6 +1216,7 @@
 
     next.version = STATE_VERSION;
     next.id = String(raw.id || crypto.randomUUID());
+    next.theme = normalizeTheme(raw.theme);
     next.sessionTitle = typeof raw.sessionTitle === "string" && raw.sessionTitle.trim()
       ? raw.sessionTitle
       : defaultSessionTitle(raw.trackedSites?.[0] || raw.entries?.[0]?.url || location.href);
@@ -1406,6 +1415,11 @@
     return Number.isFinite(number) ? number : null;
   }
 
+  function normalizeTheme(value) {
+    const normalized = String(value || DEFAULT_THEME);
+    return THEMES.has(normalized) ? normalized : DEFAULT_THEME;
+  }
+
   function isTimerRunning(timer = state.timer) {
     return Boolean(timer?.startedAt && Number.isFinite(Date.parse(timer.startedAt)));
   }
@@ -1542,10 +1556,37 @@
       }
 
       .layout-root {
+        --arg-accent: #19d2a0;
+        --arg-accent-2: #62f3ca;
+        --arg-accent-rgb: 25, 210, 160;
+        --arg-accent-soft: rgba(var(--arg-accent-rgb), 0.1);
+        --arg-accent-muted: rgba(var(--arg-accent-rgb), 0.68);
+        --arg-accent-button: rgba(18, 146, 113, 0.86);
         color: #dce8f2;
         font-size: 12px;
         line-height: 1.35;
         pointer-events: none;
+      }
+
+      .layout-root[data-theme="aqua"] {
+        --arg-accent: #38d9ff;
+        --arg-accent-2: #9eeaff;
+        --arg-accent-rgb: 56, 217, 255;
+        --arg-accent-button: rgba(31, 122, 186, 0.9);
+      }
+
+      .layout-root[data-theme="violet"] {
+        --arg-accent: #a78bfa;
+        --arg-accent-2: #ddd6fe;
+        --arg-accent-rgb: 167, 139, 250;
+        --arg-accent-button: rgba(104, 80, 180, 0.9);
+      }
+
+      .layout-root[data-theme="slate"] {
+        --arg-accent: #cbd5e1;
+        --arg-accent-2: #f8fafc;
+        --arg-accent-rgb: 203, 213, 225;
+        --arg-accent-button: rgba(71, 85, 105, 0.94);
       }
 
       button,
@@ -1628,9 +1669,9 @@
       .new-arg-button,
       .delete-arg-button {
         min-height: 25px;
-        border: 1px solid rgba(25, 210, 160, 0.76);
+        border: 1px solid rgba(var(--arg-accent-rgb), 0.76);
         border-radius: 5px;
-        background: rgba(18, 146, 113, 0.86);
+        background: var(--arg-accent-button);
         color: #f7fffb;
         font-size: 10px;
         font-weight: 900;
@@ -1679,7 +1720,7 @@
       }
 
       .drop-hint {
-        color: rgba(31, 206, 171, 0.72);
+        color: var(--arg-accent-muted);
         font-size: 12px;
         font-style: italic;
         padding: 48px 18px;
@@ -1706,7 +1747,7 @@
 
       .page-open:hover,
       .page-row.current .page-open {
-        background: rgba(19, 209, 156, 0.09);
+        background: var(--arg-accent-soft);
       }
 
       .page-row.missing .page-open {
@@ -1777,7 +1818,7 @@
       }
 
       .page-no {
-        color: #19d2a0;
+        color: var(--arg-accent);
         font-weight: 900;
       }
 
@@ -1806,7 +1847,7 @@
       }
 
       .page-time {
-        color: #19d2a0;
+        color: var(--arg-accent);
         font-size: 10px;
         font-weight: 850;
       }
@@ -1839,8 +1880,8 @@
         height: 12px;
         margin-right: 6px;
         border-radius: 50%;
-        background: #19d2a0;
-        box-shadow: 0 0 14px rgba(25, 210, 160, 0.65);
+        background: var(--arg-accent);
+        box-shadow: 0 0 14px rgba(var(--arg-accent-rgb), 0.65);
       }
 
       .progress-label span,
@@ -1850,7 +1891,7 @@
 
       .progress-label strong,
       .bar-head strong {
-        color: #19d2a0;
+        color: var(--arg-accent);
       }
 
       .progress-track {
@@ -1865,7 +1906,7 @@
         height: 100%;
         width: 0;
         border-radius: inherit;
-        background: linear-gradient(90deg, #19d2a0, #62f3ca);
+        background: linear-gradient(90deg, var(--arg-accent), var(--arg-accent-2));
       }
 
       .bottom-bar {
@@ -1935,8 +1976,8 @@
       }
 
       .page-form button {
-        border-color: rgba(25, 210, 160, 0.8);
-        background: rgba(18, 146, 113, 0.92);
+        border-color: rgba(var(--arg-accent-rgb), 0.8);
+        background: var(--arg-accent-button);
         color: #f7fffb;
         font-weight: 900;
         cursor: pointer;
@@ -1946,7 +1987,7 @@
         min-width: min(18ch, 30vw);
         max-width: 28ch;
         overflow: hidden;
-        color: #19d2a0;
+        color: var(--arg-accent);
         font-style: normal;
         font-weight: 700;
         text-align: right;
@@ -1975,8 +2016,8 @@
       .help-button:hover,
       .help-button[aria-expanded="true"],
       .help-close:hover {
-        border-color: rgba(25, 210, 160, 0.85);
-        color: #19d2a0;
+        border-color: rgba(var(--arg-accent-rgb), 0.85);
+        color: var(--arg-accent);
       }
 
       .help-panel {
@@ -2050,7 +2091,7 @@
       }
 
       .keyword-empty {
-        color: rgba(31, 206, 171, 0.64);
+        color: var(--arg-accent-muted);
         font-style: italic;
       }
 
