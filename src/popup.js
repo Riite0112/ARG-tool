@@ -777,28 +777,13 @@ async function readQrClipboard() {
 
 async function decodeQrImage(blob) {
   els.qrResults.textContent = "";
-
-  if (!("BarcodeDetector" in globalThis)) {
-    renderResultMessage(els.qrResults, "このブラウザではQR読取に対応していません。");
-    setStatus("QR読取に対応していない環境です。", true);
-    return;
-  }
-
   setBusy(true);
   setStatus("QRコードを読み取っています。");
 
   let bitmap = null;
   try {
-    const formats = typeof BarcodeDetector.getSupportedFormats === "function"
-      ? await BarcodeDetector.getSupportedFormats()
-      : ["qr_code"];
-    if (!formats.includes("qr_code")) {
-      throw new Error("QRコード形式に対応していません。");
-    }
-
-    const detector = new BarcodeDetector({ formats: ["qr_code"] });
     bitmap = await createImageBitmap(blob);
-    const codes = await detector.detect(bitmap);
+    const codes = await detectQrCodes(bitmap);
 
     if (!codes.length) {
       renderResultMessage(els.qrResults, "QRコードを検出できませんでした。");
@@ -817,6 +802,49 @@ async function decodeQrImage(blob) {
     bitmap?.close?.();
     setBusy(false);
   }
+}
+
+async function detectQrCodes(bitmap) {
+  const nativeCodes = await detectQrWithBarcodeDetector(bitmap);
+  if (nativeCodes.length) return nativeCodes;
+
+  const jsQrCode = detectQrWithJsQr(bitmap);
+  return jsQrCode ? [jsQrCode] : [];
+}
+
+async function detectQrWithBarcodeDetector(bitmap) {
+  if (!("BarcodeDetector" in globalThis)) return [];
+
+  try {
+    const formats = typeof BarcodeDetector.getSupportedFormats === "function"
+      ? await BarcodeDetector.getSupportedFormats()
+      : ["qr_code"];
+    if (!formats.includes("qr_code")) return [];
+
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    return detector.detect(bitmap);
+  } catch {
+    return [];
+  }
+}
+
+function detectQrWithJsQr(bitmap) {
+  if (typeof globalThis.jsQR !== "function") {
+    throw new Error("QR読取ライブラリを読み込めませんでした。");
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("QR画像を解析できませんでした。");
+
+  context.drawImage(bitmap, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const code = globalThis.jsQR(imageData.data, imageData.width, imageData.height, {
+    inversionAttempts: "attemptBoth"
+  });
+  return code?.data ? { rawValue: code.data } : null;
 }
 
 function clearQrTool() {
