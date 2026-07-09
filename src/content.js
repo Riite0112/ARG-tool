@@ -64,7 +64,6 @@
   let fixedElementObserver = null;
   let fixedElementFrame = 0;
   let originalBodyPaddingBottom = null;
-  let timerTicker = 0;
 
   if (canUseExtensionApi) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -182,7 +181,6 @@
       layout.host.hidden = true;
       layout.host.style.display = "none";
     }
-    syncTimerTicker();
     resetPageLayout();
   }
 
@@ -218,16 +216,6 @@
           </div>
           <ol id="pageList" class="page-list"></ol>
           <footer class="progress">
-            <div class="timer-box">
-              <div class="timer-label">
-                <span>TIMER</span>
-                <strong id="timerDisplay">00:00:00</strong>
-              </div>
-              <div class="timer-actions">
-                <button id="timerToggleButton" type="button">Start</button>
-                <button id="timerResetButton" type="button">Reset</button>
-              </div>
-            </div>
             <div class="progress-label">
               <span>PROGRESS</span>
               <strong id="progressCount">0 / 0</strong>
@@ -273,7 +261,7 @@
               <li>右上の拡張機能アイコンで表示メニューを開き、ページとキーワードを個別に表示できます。</li>
               <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
               <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
-              <li>左下の <strong>TIMER</strong> を開始すると、ページ保存時の経過時間がページ一覧に記録されます。</li>
+              <li>拡張機能メニューの <strong>TIMER</strong> を開始すると、ページ保存時の経過時間がページ一覧に記録されます。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
               <li>下のキーワードはクリックでコピー、<strong>×</strong> で削除します。</li>
               <li>ページ右下のファイル番号などは、下バーに隠れないよう自動で上へ退避します。</li>
@@ -317,8 +305,6 @@
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
-    els.timerToggleButton.addEventListener("click", toggleTimer);
-    els.timerResetButton.addEventListener("click", resetTimer);
     els.helpButton.addEventListener("click", toggleHelpPanel);
     els.closeHelpButton.addEventListener("click", closeHelpPanel);
 
@@ -747,7 +733,6 @@
     renderPages();
     renderKeywords();
     renderProgress();
-    renderTimer();
     scheduleProtectFixedElements();
   }
 
@@ -911,63 +896,6 @@
     els.progressCount.textContent = `${count} / ${total || "-"}`;
     els.progressBar.style.width = total ? `${Math.min(100, (count / total) * 100)}%` : "0%";
     els.targetPagesInput.value = total || "";
-  }
-
-  function renderTimer() {
-    if (!els.timerDisplay || !els.timerToggleButton) return;
-
-    const running = isTimerRunning();
-    els.timerDisplay.textContent = formatElapsedMs(currentTimerElapsedMs());
-    els.timerToggleButton.textContent = running ? "Pause" : "Start";
-    els.timerToggleButton.classList.toggle("running", running);
-    els.timerResetButton.disabled = !timerWasStarted();
-    syncTimerTicker();
-  }
-
-  async function toggleTimer() {
-    if (isTimerRunning()) {
-      state.timer.elapsedMs = currentTimerElapsedMs();
-      state.timer.startedAt = null;
-      await saveState();
-      renderTimer();
-      setSaveStatus("タイマーを一時停止しました", false);
-      return;
-    }
-
-    state.timer.startedAt = new Date().toISOString();
-    state.timer.startedOnce = true;
-    await saveState();
-    renderTimer();
-    setSaveStatus("タイマーを開始しました", false);
-  }
-
-  async function resetTimer() {
-    if (!timerWasStarted()) return;
-    if (!confirm("タイマーをリセットしますか？\n保存済みページに記録された時間は残ります。")) return;
-
-    state.timer = {
-      startedAt: null,
-      elapsedMs: 0,
-      startedOnce: false
-    };
-    await saveState();
-    renderTimer();
-    renderPages();
-    setSaveStatus("タイマーをリセットしました", false);
-  }
-
-  function syncTimerTicker() {
-    if (isTimerRunning() && isLayoutVisible()) {
-      if (!timerTicker) {
-        timerTicker = window.setInterval(renderTimer, 1000);
-      }
-      return;
-    }
-
-    if (timerTicker) {
-      window.clearInterval(timerTicker);
-      timerTicker = 0;
-    }
   }
 
   function syncInputsWithCurrentPage() {
@@ -1643,7 +1571,7 @@
         bottom: ${BOTTOM_HEIGHT + 8}px;
         width: 244px;
         display: grid;
-        grid-template-rows: 128px auto minmax(0, 1fr) 112px;
+        grid-template-rows: 128px auto minmax(0, 1fr) 58px;
         overflow: hidden;
         border-radius: 6px;
       }
@@ -1890,62 +1818,9 @@
       .progress {
         display: grid;
         align-content: center;
-        gap: 7px;
+        gap: 8px;
         border-top: 1px solid rgba(72, 95, 127, 0.8);
-        padding: 8px 12px;
-      }
-
-      .timer-box {
-        display: grid;
-        gap: 6px;
-        min-width: 0;
-      }
-
-      .timer-label {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: #9daabe;
-        font-size: 10px;
-        font-weight: 900;
-      }
-
-      .timer-label span {
-        margin-right: auto;
-      }
-
-      .timer-label strong {
-        color: #f7fffb;
-        font-size: 13px;
-        font-variant-numeric: tabular-nums;
-      }
-
-      .timer-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 6px;
-      }
-
-      .timer-actions button {
-        min-height: 24px;
-        border: 1px solid rgba(72, 95, 127, 0.9);
-        border-radius: 5px;
-        background: rgba(5, 10, 22, 0.88);
-        color: #dce8f2;
-        font-size: 10px;
-        font-weight: 900;
-        cursor: pointer;
-      }
-
-      .timer-actions button:hover,
-      .timer-actions button.running {
-        border-color: rgba(25, 210, 160, 0.84);
-        color: #19d2a0;
-      }
-
-      .timer-actions button:disabled {
-        cursor: not-allowed;
-        opacity: 0.45;
+        padding: 10px 14px;
       }
 
       .progress-label,

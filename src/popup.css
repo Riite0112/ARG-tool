@@ -144,6 +144,58 @@ button {
   font-size: 18px;
 }
 
+.timer-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 68px 68px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(77, 101, 136, 0.68);
+  border-radius: 6px;
+  background: rgba(5, 10, 22, 0.78);
+  padding: 8px;
+}
+
+.timer-card div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.timer-card small {
+  color: #9daabe;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.timer-card strong {
+  color: #f7fffb;
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.timer-card button {
+  min-height: 30px;
+  border: 1px solid rgba(77, 101, 136, 0.9);
+  border-radius: 6px;
+  background: rgba(8, 14, 27, 0.72);
+  color: #cfe2f2;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.timer-card button:hover,
+.timer-card button.running {
+  border-color: rgba(34, 230, 178, 0.78);
+  color: #22e6b2;
+}
+
+.timer-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .tool-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

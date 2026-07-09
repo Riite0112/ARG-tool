@@ -1,7 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 7;
+const STATE_VERSION = 8;
 const DEFAULT_LAYOUT_VIEW = "all";
 const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
 
@@ -79,6 +79,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "ARG_SCOUT_TOGGLE_TIMER") {
+    toggleActiveTimer()
+      .then((state) => sendResponse({ ok: true, ...state }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
+  if (message?.type === "ARG_SCOUT_RESET_TIMER") {
+    resetActiveTimer()
+      .then((state) => sendResponse({ ok: true, ...state }))
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
+
   if (message?.type === "ARG_SCOUT_GET_POPUP_STATE") {
     getActiveTab()
       .then(getPopupState)
@@ -106,6 +120,50 @@ async function openToolView(view) {
     view: normalizeLayoutView(view)
   });
   await updateBadge();
+  return getPopupState(tab);
+}
+
+async function toggleActiveTimer() {
+  const tab = await getActiveTab();
+  if (!isSavableTab(tab)) {
+    return { savable: false };
+  }
+
+  const store = await loadState();
+  const session = resolveSessionForUrl(store, tab.url, { create: true });
+  store.activeSessionId = session.id;
+  addTrackedSiteFromUrl(session, tab.url);
+
+  if (isTimerRunning(session.timer)) {
+    session.timer.elapsedMs = currentTimerElapsedMs(session.timer);
+    session.timer.startedAt = null;
+  } else {
+    session.timer.startedAt = new Date().toISOString();
+    session.timer.startedOnce = true;
+  }
+
+  session.updatedAt = new Date().toISOString();
+  await saveState(store);
+  return getPopupState(tab);
+}
+
+async function resetActiveTimer() {
+  const tab = await getActiveTab();
+  if (!isSavableTab(tab)) {
+    return { savable: false };
+  }
+
+  const store = await loadState();
+  const session = resolveSessionForUrl(store, tab.url, { create: true });
+  store.activeSessionId = session.id;
+  addTrackedSiteFromUrl(session, tab.url);
+  session.timer = {
+    startedAt: null,
+    elapsedMs: 0,
+    startedOnce: false
+  };
+  session.updatedAt = new Date().toISOString();
+  await saveState(store);
   return getPopupState(tab);
 }
 
@@ -276,7 +334,10 @@ async function getPopupState(tab) {
     pageCount: session?.entries.length || 0,
     keywordCount,
     targetPages: session?.targetPages || 0,
-    currentPageNo: currentEntry?.pageNo || null
+    currentPageNo: currentEntry?.pageNo || null,
+    timerElapsedMs: currentTimerElapsedMs(session?.timer),
+    timerRunning: isTimerRunning(session?.timer),
+    timerStarted: timerWasStarted(session?.timer)
   };
 }
 
@@ -362,6 +423,11 @@ function sanitizeSession(raw) {
       primary: [],
       reserve: []
     },
+    timer: {
+      startedAt: null,
+      elapsedMs: 0,
+      startedOnce: false
+    },
     createdAt: raw?.createdAt || new Date().toISOString(),
     updatedAt: null
   };
@@ -379,6 +445,7 @@ function sanitizeSession(raw) {
   state.entries.forEach((entry) => addTrackedSiteFromUrl(state, entry.url));
   state.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
   state.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
+  state.timer = sanitizeTimer(raw.timer);
   state.updatedAt = raw.updatedAt || null;
   return state;
 }
@@ -389,7 +456,8 @@ function hasSessionData(session) {
     session.keywords.primary.length ||
     session.keywords.reserve.length ||
     session.trackedSites.length ||
-    session.targetPages
+    session.targetPages ||
+    timerWasStarted(session.timer)
   );
 }
 
@@ -458,10 +526,24 @@ function sanitizeEntry(entry) {
     url: String(entry.url || ""),
     notes: String(entry.notes || ""),
     color: /^#[0-9a-f]{6}$/i.test(String(entry.color || "")) ? entry.color : "#5ff0b1",
-    status: ["open", "checked", "solved"].includes(entry.status) ? entry.status : "open",
+    status: ["open", "checked", "solved", "revisit"].includes(entry.status) ? entry.status : "open",
+    savedElapsedMs: parseNonNegativeNumber(entry.savedElapsedMs),
     source: entry.source === MANUAL_SOURCE ? MANUAL_SOURCE : MANUAL_SOURCE,
     createdAt: entry.createdAt || new Date().toISOString(),
     updatedAt: entry.updatedAt || new Date().toISOString()
+  };
+}
+
+function sanitizeTimer(timer) {
+  const startedAt = typeof timer?.startedAt === "string" && Number.isFinite(Date.parse(timer.startedAt))
+    ? timer.startedAt
+    : null;
+  const elapsedMs = parseNonNegativeNumber(timer?.elapsedMs) || 0;
+
+  return {
+    startedAt,
+    elapsedMs,
+    startedOnce: Boolean(timer?.startedOnce || startedAt || elapsedMs)
   };
 }
 
@@ -479,6 +561,27 @@ function sanitizeKeywordArray(value) {
 function parsePositiveInt(value) {
   const number = Number.parseInt(value, 10);
   return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function parseNonNegativeNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+function isTimerRunning(timer) {
+  return Boolean(timer?.startedAt && Number.isFinite(Date.parse(timer.startedAt)));
+}
+
+function timerWasStarted(timer) {
+  return Boolean(timer?.startedOnce || timer?.startedAt || (timer?.elapsedMs || 0) > 0);
+}
+
+function currentTimerElapsedMs(timer) {
+  const elapsedMs = parseNonNegativeNumber(timer?.elapsedMs) || 0;
+  if (!isTimerRunning(timer)) return elapsedMs;
+
+  return Math.max(0, elapsedMs + Date.now() - Date.parse(timer.startedAt));
 }
 
 function normalizeSiteBase(value) {
