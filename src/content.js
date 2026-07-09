@@ -760,6 +760,7 @@
       const item = document.createElement("li");
       item.className = "page-row";
       item.classList.toggle("missing", Boolean(page.missing));
+      item.classList.toggle("revisit", page.status === "revisit");
 
       if (page.missing) {
         item.innerHTML = `
@@ -770,6 +771,7 @@
               <span class="page-url">まだ発見・登録されていません</span>
             </span>
           </div>
+          <span class="page-action-placeholder" aria-hidden="true"></span>
           <span class="page-delete-placeholder" aria-hidden="true"></span>
         `;
         els.pageList.append(item);
@@ -799,6 +801,14 @@
         location.href = page.url;
       });
 
+      const revisitButton = document.createElement("button");
+      revisitButton.type = "button";
+      revisitButton.className = "page-revisit";
+      revisitButton.classList.toggle("active", page.status === "revisit");
+      revisitButton.title = page.status === "revisit" ? "通常色に戻す" : "あとで再訪するページとしてマーク";
+      revisitButton.textContent = "!";
+      revisitButton.addEventListener("click", () => togglePageRevisit(page.id));
+
       const deleteButton = document.createElement("button");
       deleteButton.type = "button";
       deleteButton.className = "page-delete";
@@ -806,7 +816,7 @@
       deleteButton.textContent = "×";
       deleteButton.addEventListener("click", () => deleteSavedPage(page.id));
 
-      item.append(openButton, deleteButton);
+      item.append(openButton, revisitButton, deleteButton);
       els.pageList.append(item);
     });
 
@@ -1082,6 +1092,17 @@
     setSaveStatus("ページを削除しました", false);
   }
 
+  async function togglePageRevisit(id) {
+    const entry = state.entries.find((item) => item.id === id);
+    if (!entry) return;
+
+    entry.status = entry.status === "revisit" ? "open" : "revisit";
+    entry.updatedAt = new Date().toISOString();
+    await saveState();
+    renderPages();
+    setSaveStatus(entry.status === "revisit" ? "再訪マークを付けました" : "通常色に戻しました", false);
+  }
+
   function allowDrop(event) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -1206,7 +1227,7 @@
       url: String(entry.url || ""),
       notes: String(entry.notes || ""),
       color: normalizeColor(entry.color) || "#5ff0b1",
-      status: ["open", "checked", "solved"].includes(entry.status) ? entry.status : "open",
+      status: ["open", "checked", "solved", "revisit"].includes(entry.status) ? entry.status : "open",
       source: MANUAL_SOURCE,
       createdAt: entry.createdAt || new Date().toISOString(),
       updatedAt: entry.updatedAt || new Date().toISOString()
@@ -1607,7 +1628,7 @@
 
       .page-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 30px;
+        grid-template-columns: minmax(0, 1fr) 26px 30px;
         border-bottom: 1px solid rgba(72, 95, 127, 0.35);
       }
 
@@ -1646,10 +1667,30 @@
         color: rgba(255, 111, 145, 0.66);
       }
 
+      .page-action-placeholder,
       .page-delete-placeholder {
         border-left: 1px solid rgba(72, 95, 127, 0.28);
       }
 
+      .page-row.revisit .page-open {
+        background: rgba(255, 171, 64, 0.08);
+      }
+
+      .page-row.revisit .page-no,
+      .page-row.revisit .page-key {
+        color: #ffb347;
+      }
+
+      .page-row.revisit .page-url {
+        color: rgba(255, 179, 71, 0.68);
+      }
+
+      .page-row.current.revisit .page-open,
+      .page-row.revisit .page-open:hover {
+        background: rgba(255, 171, 64, 0.14);
+      }
+
+      .page-revisit,
       .page-delete {
         border: 0;
         border-left: 1px solid rgba(72, 95, 127, 0.28);
@@ -1658,6 +1699,17 @@
         font-size: 16px;
         font-weight: 800;
         cursor: pointer;
+      }
+
+      .page-revisit {
+        color: #9daabe;
+        font-size: 12px;
+      }
+
+      .page-revisit:hover,
+      .page-revisit.active {
+        background: rgba(255, 171, 64, 0.14);
+        color: #ffb347;
       }
 
       .page-delete:hover {
