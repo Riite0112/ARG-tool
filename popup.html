@@ -73,22 +73,12 @@
           <strong>キーワード</strong>
           <small>下バー</small>
         </button>
-        <button id="supportButton" class="tool-tab support" type="button">
-          <span class="tab-icon dev-icon">FB</span>
-          <strong>意見</strong>
-          <small>フォーム</small>
-        </button>
         <button id="hideToolButton" class="tool-tab muted" type="button">
           <span class="tab-icon">×</span>
           <strong>非表示</strong>
           <small>閉じる</small>
         </button>
       </nav>
-
-      <button id="supportPendingButton" class="support-pending" type="button">
-        <span>開発者を応援</span>
-        <strong>準備中</strong>
-      </button>
 
       <section class="utility-tools" aria-label="調査ツール">
         <div class="utility-tabs">
@@ -117,6 +107,15 @@
           </div>
           <ul id="qrResults" class="result-list"></ul>
         </section>
+      </section>
+
+      <section class="menu-actions" aria-label="連絡と応援">
+        <button id="feedbackButton" class="menu-action feedback-action" type="button">
+          <span>不具合等の報告はこちらから</span>
+        </button>
+        <button id="supportPendingButton" class="menu-action support-action" type="button">
+          <span>開発者を応援する</span>
+        </button>
       </section>
 
       <p id="statusText" class="status-text" role="status">ページとキーワードを個別に選択できます。</p>

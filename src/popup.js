@@ -43,7 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => toggleUtility(button.dataset.utility));
   });
 
-  els.supportButton.addEventListener("click", showSupportPlaceholder);
+  els.feedbackButton.addEventListener("click", showFeedbackPlaceholder);
   els.supportPendingButton.addEventListener("click", showSupportPendingPlaceholder);
   els.hideButton.addEventListener("click", hideTool);
   els.hideToolButton.addEventListener("click", hideTool);
@@ -109,7 +109,7 @@ async function openView(view) {
   }
 }
 
-function showSupportPlaceholder() {
+function showFeedbackPlaceholder() {
   if (!FEEDBACK_FORM_URL) {
     setStatus("フィードバックフォームは準備中です。src/config.js にGoogleフォームURLを入れると開けるようになります。", false, true);
     return;
@@ -281,6 +281,9 @@ function setBusy(busy) {
     button.disabled = Boolean(busy);
   });
   if (!busy) {
+    document.querySelectorAll("button").forEach((button) => {
+      button.disabled = false;
+    });
     setDisabled(!popupSavable);
   }
 }
