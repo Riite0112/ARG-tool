@@ -85,6 +85,35 @@
         </button>
       </nav>
 
+      <section class="utility-tools" aria-label="調査ツール">
+        <div class="utility-tabs">
+          <button class="utility-tab" type="button" data-utility="mojibake" aria-pressed="false">文字化け</button>
+          <button class="utility-tab" type="button" data-utility="qr" aria-pressed="false">QR読取</button>
+        </div>
+
+        <section id="mojibakeTool" class="utility-panel" hidden>
+          <textarea id="mojibakeInput" class="tool-textarea" rows="3" placeholder="文字化けした文字を貼り付け"></textarea>
+          <div class="tool-actions">
+            <button id="mojibakePasteButton" type="button">貼付</button>
+            <button id="mojibakeFixButton" type="button">復元</button>
+            <button id="mojibakeClearButton" type="button">消去</button>
+          </div>
+          <ul id="mojibakeResults" class="result-list"></ul>
+        </section>
+
+        <section id="qrTool" class="utility-panel" hidden>
+          <label class="file-picker">
+            <span>QR画像を選択</span>
+            <input id="qrFileInput" type="file" accept="image/*">
+          </label>
+          <div class="tool-actions">
+            <button id="qrClipboardButton" type="button">画像貼付</button>
+            <button id="qrClearButton" type="button">消去</button>
+          </div>
+          <ul id="qrResults" class="result-list"></ul>
+        </section>
+      </section>
+
       <p id="statusText" class="status-text" role="status">ページとキーワードを個別に選択できます。</p>
     </main>
     <script src="src/popup.js"></script>

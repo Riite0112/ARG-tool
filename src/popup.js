@@ -14,12 +14,14 @@ const themeLabels = {
 const DEFAULT_THEME = "emerald";
 const THEMES = new Set(Object.keys(themeLabels));
 const els = {};
+const encodingMaps = new Map();
 let selectedPanels = new Set();
 let timerState = {
   elapsedMs: 0,
   running: false,
   started: false
 };
+let popupSavable = true;
 let autoStashCopy = false;
 let timerTicker = 0;
 
@@ -36,12 +38,22 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => setTheme(button.dataset.theme));
   });
 
+  document.querySelectorAll("[data-utility]").forEach((button) => {
+    button.addEventListener("click", () => toggleUtility(button.dataset.utility));
+  });
+
   els.supportButton.addEventListener("click", showSupportPlaceholder);
   els.hideButton.addEventListener("click", hideTool);
   els.hideToolButton.addEventListener("click", hideTool);
   els.timerToggleButton.addEventListener("click", toggleTimer);
   els.timerResetButton.addEventListener("click", resetTimer);
   els.autoCopyButton.addEventListener("click", toggleAutoStashCopy);
+  els.mojibakePasteButton.addEventListener("click", pasteMojibakeText);
+  els.mojibakeFixButton.addEventListener("click", restoreMojibakeInput);
+  els.mojibakeClearButton.addEventListener("click", clearMojibakeTool);
+  els.qrFileInput.addEventListener("change", readQrFile);
+  els.qrClipboardButton.addEventListener("click", readQrClipboard);
+  els.qrClearButton.addEventListener("click", clearQrTool);
   loadPopupState();
 });
 
@@ -117,6 +129,7 @@ async function hideTool() {
 }
 
 function renderState(state) {
+  popupSavable = Boolean(state.savable);
   els.siteLabel.textContent = state.site || state.url || "現在のページ";
   els.sessionTitle.textContent = state.sessionTitle || "ARG探索メモ";
   els.pageCount.textContent = String(state.pageCount || 0);
@@ -250,7 +263,7 @@ function setBusy(busy) {
     button.disabled = Boolean(busy);
   });
   if (!busy) {
-    els.timerResetButton.disabled = !timerState.started;
+    setDisabled(!popupSavable);
   }
 }
 
@@ -280,6 +293,26 @@ function renderAutoStashCopyState(enabled) {
   els.autoCopyButton.setAttribute("aria-pressed", String(autoStashCopy));
 }
 
+function toggleUtility(utility) {
+  const panel = utility === "qr" ? els.qrTool : els.mojibakeTool;
+  const shouldOpen = panel.hidden;
+
+  document.querySelectorAll(".utility-panel").forEach((node) => {
+    node.hidden = true;
+  });
+  document.querySelectorAll("[data-utility]").forEach((button) => {
+    button.classList.remove("active");
+    button.setAttribute("aria-pressed", "false");
+  });
+
+  if (!shouldOpen) return;
+
+  panel.hidden = false;
+  const active = document.querySelector(`[data-utility="${utility}"]`);
+  active?.classList.add("active");
+  active?.setAttribute("aria-pressed", "true");
+}
+
 function panelsFromView(view) {
   if (view === "all") return new Set(["pages", "keywords"]);
   if (view === "pages") return new Set(["pages"]);
@@ -305,6 +338,275 @@ function setStatus(text, isError = false, isOk = false) {
 function normalizeTheme(value) {
   const normalized = String(value || DEFAULT_THEME);
   return THEMES.has(normalized) ? normalized : DEFAULT_THEME;
+}
+
+async function pasteMojibakeText() {
+  try {
+    const text = await navigator.clipboard.readText();
+    els.mojibakeInput.value = text;
+    restoreMojibakeInput();
+  } catch {
+    setStatus("クリップボードの文字を読めませんでした。", true);
+  }
+}
+
+function restoreMojibakeInput() {
+  const text = els.mojibakeInput.value.trim();
+  els.mojibakeResults.textContent = "";
+
+  if (!text) {
+    renderResultMessage(els.mojibakeResults, "復元したい文字を入力してください。");
+    return;
+  }
+
+  const candidates = restoreMojibake(text);
+  if (!candidates.length) {
+    renderResultMessage(els.mojibakeResults, "復元候補は見つかりませんでした。");
+    return;
+  }
+
+  candidates.forEach((candidate) => {
+    renderCopyResult(els.mojibakeResults, candidate.label, candidate.value);
+  });
+  setStatus("文字化け復元候補を表示しました。", false, true);
+}
+
+function clearMojibakeTool() {
+  els.mojibakeInput.value = "";
+  els.mojibakeResults.textContent = "";
+}
+
+function restoreMojibake(text) {
+  const candidates = [];
+  const original = text.trim();
+
+  addCandidate(candidates, original, "UTF-8 → Shift_JIS誤読", () => {
+    return decodeBytes(encodeByMap(original, "shift_jis"), "utf-8");
+  });
+  addCandidate(candidates, original, "UTF-8 → Windows-1252誤読", () => {
+    return decodeBytes(encodeByMap(original, "windows-1252"), "utf-8");
+  });
+  addCandidate(candidates, original, "Shift_JIS → Windows-1252誤読", () => {
+    return decodeBytes(encodeByMap(original, "windows-1252"), "shift_jis");
+  });
+  addCandidate(candidates, original, "EUC-JP → Windows-1252誤読", () => {
+    return decodeBytes(encodeByMap(original, "windows-1252"), "euc-jp");
+  });
+  addCandidate(candidates, original, "URLデコード", () => {
+    if (!/%[0-9a-f]{2}/i.test(original)) return "";
+    return decodeURIComponent(original.replace(/\+/g, "%20"));
+  });
+  addCandidate(candidates, original, "HTMLエンティティ解除", () => {
+    if (!/&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i.test(original)) return "";
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = original;
+    return textarea.value;
+  });
+
+  return candidates.sort((a, b) => japaneseScore(b.value) - japaneseScore(a.value));
+}
+
+function addCandidate(candidates, original, label, factory) {
+  try {
+    const value = String(factory() || "").trim();
+    if (!value || value === original || value.includes("\uFFFD")) return;
+    if (candidates.some((candidate) => candidate.value === value)) return;
+    candidates.push({ label, value });
+  } catch {
+    // Unsupported encodings or invalid byte sequences are just skipped.
+  }
+}
+
+function decodeBytes(bytes, label) {
+  if (!bytes?.length) return "";
+  return new TextDecoder(label, { fatal: true }).decode(bytes);
+}
+
+function encodeByMap(text, label) {
+  const map = getEncodingMap(label);
+  const bytes = [];
+
+  for (const char of text) {
+    const encoded = map.get(char);
+    if (!encoded) return null;
+    bytes.push(...encoded);
+  }
+
+  return new Uint8Array(bytes);
+}
+
+function getEncodingMap(label) {
+  if (encodingMaps.has(label)) return encodingMaps.get(label);
+
+  const map = label === "shift_jis" ? buildShiftJisEncodeMap() : buildSingleByteEncodeMap(label);
+  encodingMaps.set(label, map);
+  return map;
+}
+
+function buildSingleByteEncodeMap(label) {
+  const decoder = new TextDecoder(label, { fatal: true });
+  const map = new Map();
+
+  for (let byte = 0; byte <= 0xFF; byte += 1) {
+    try {
+      const char = decoder.decode(new Uint8Array([byte]));
+      if (!map.has(char)) map.set(char, [byte]);
+    } catch {
+      // Some single-byte labels leave a few byte values undefined.
+    }
+  }
+
+  return map;
+}
+
+function buildShiftJisEncodeMap() {
+  const decoder = new TextDecoder("shift_jis", { fatal: true });
+  const map = new Map();
+  const add = (bytes) => {
+    try {
+      const char = decoder.decode(new Uint8Array(bytes));
+      if (char && !map.has(char)) map.set(char, bytes);
+    } catch {
+      // Invalid Shift_JIS sequences are ignored.
+    }
+  };
+
+  for (let byte = 0x00; byte <= 0x7F; byte += 1) add([byte]);
+  for (let byte = 0xA1; byte <= 0xDF; byte += 1) add([byte]);
+
+  const leadRanges = [
+    [0x81, 0x9F],
+    [0xE0, 0xFC]
+  ];
+  const trailRanges = [
+    [0x40, 0x7E],
+    [0x80, 0xFC]
+  ];
+
+  leadRanges.forEach(([leadStart, leadEnd]) => {
+    for (let lead = leadStart; lead <= leadEnd; lead += 1) {
+      trailRanges.forEach(([trailStart, trailEnd]) => {
+        for (let trail = trailStart; trail <= trailEnd; trail += 1) {
+          add([lead, trail]);
+        }
+      });
+    }
+  });
+
+  return map;
+}
+
+function japaneseScore(value) {
+  const japanese = value.match(/[\u3040-\u30ff\u3400-\u9fff]/g)?.length || 0;
+  const ascii = value.match(/[A-Za-z0-9]/g)?.length || 0;
+  return japanese * 3 + ascii;
+}
+
+async function readQrFile() {
+  const file = els.qrFileInput.files?.[0];
+  if (!file) return;
+  await decodeQrImage(file);
+}
+
+async function readQrClipboard() {
+  if (!navigator.clipboard?.read) {
+    setStatus("この環境では画像貼付に対応していません。画像ファイルを選択してください。", true);
+    return;
+  }
+
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const type = item.types.find((candidate) => candidate.startsWith("image/"));
+      if (!type) continue;
+      await decodeQrImage(await item.getType(type));
+      return;
+    }
+    setStatus("クリップボードに画像がありません。", true);
+  } catch {
+    setStatus("クリップボード画像を読めませんでした。画像ファイルを選択してください。", true);
+  }
+}
+
+async function decodeQrImage(blob) {
+  els.qrResults.textContent = "";
+
+  if (!("BarcodeDetector" in globalThis)) {
+    renderResultMessage(els.qrResults, "このブラウザではQR読取に対応していません。");
+    setStatus("QR読取に対応していない環境です。", true);
+    return;
+  }
+
+  setBusy(true);
+  setStatus("QRコードを読み取っています。");
+
+  let bitmap = null;
+  try {
+    const formats = typeof BarcodeDetector.getSupportedFormats === "function"
+      ? await BarcodeDetector.getSupportedFormats()
+      : ["qr_code"];
+    if (!formats.includes("qr_code")) {
+      throw new Error("QRコード形式に対応していません。");
+    }
+
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    bitmap = await createImageBitmap(blob);
+    const codes = await detector.detect(bitmap);
+
+    if (!codes.length) {
+      renderResultMessage(els.qrResults, "QRコードを検出できませんでした。");
+      setStatus("QRコードを検出できませんでした。", true);
+      return;
+    }
+
+    codes.forEach((code, index) => {
+      renderCopyResult(els.qrResults, `QR ${index + 1}`, code.rawValue || "");
+    });
+    setStatus("QRコードを読み取りました。", false, true);
+  } catch (error) {
+    renderResultMessage(els.qrResults, error.message || "QRコードを読み取れませんでした。");
+    setStatus(error.message || "QRコードを読み取れませんでした。", true);
+  } finally {
+    bitmap?.close?.();
+    setBusy(false);
+  }
+}
+
+function clearQrTool() {
+  els.qrFileInput.value = "";
+  els.qrResults.textContent = "";
+}
+
+function renderResultMessage(list, text) {
+  const item = document.createElement("li");
+  item.className = "result-empty";
+  item.textContent = text;
+  list.append(item);
+}
+
+function renderCopyResult(list, label, value) {
+  if (!value) return;
+
+  const item = document.createElement("li");
+  item.className = "result-item";
+  const button = document.createElement("button");
+  button.type = "button";
+  button.innerHTML = `<small></small><strong></strong>`;
+  button.querySelector("small").textContent = label;
+  button.querySelector("strong").textContent = value;
+  button.title = "クリックでコピー";
+  button.addEventListener("click", () => copyUtilityText(value));
+  item.append(button);
+  list.append(item);
+}
+
+async function copyUtilityText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+    setStatus("コピーしました。", false, true);
+  } catch {
+    setStatus("コピーできませんでした。", true);
+  }
 }
 
 function syncTimerTicker() {
