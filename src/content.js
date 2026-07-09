@@ -270,7 +270,7 @@
               <li>拡張機能メニューの <strong>TIMER</strong> を開始すると、ページ保存時の経過時間がページ一覧に記録されます。</li>
               <li>拡張機能メニューの <strong>COPY</strong> をONにすると、ページ上でコピーした文字をキーワードへ一時保存します。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
-              <li>下のキーワードはクリックでコピー、<strong>×</strong> で削除します。</li>
+              <li>下のキーワードはクリックでコピー、右クリックまたは <strong>×</strong> で削除します。</li>
               <li>ページ右下のファイル番号などは、下バーに隠れないよう自動で上へ退避します。</li>
             </ul>
           </div>
@@ -895,9 +895,14 @@
         <button class="keyword-delete" type="button" aria-label="削除">×</button>
       `;
       item.querySelector(".keyword-use").textContent = keyword.text;
-      item.querySelector(".keyword-use").title = "クリックでコピー";
+      item.title = "右クリックで削除";
+      item.querySelector(".keyword-use").title = "クリックでコピー / 右クリックで削除";
       item.querySelector(".keyword-use").addEventListener("click", () => copyKeywordText(keyword.text));
       item.querySelector(".keyword-delete").addEventListener("click", () => deleteKeyword(keyword.bucket, keyword.id));
+      item.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        deleteKeyword(keyword.bucket, keyword.id);
+      });
       els.keywordList.append(item);
     });
   }
@@ -1440,6 +1445,7 @@
     state.keywords[target] = state.keywords[target].filter((keyword) => keyword.id !== id);
     await saveState();
     renderKeywords();
+    setSaveStatus("キーワードを削除しました", false);
   }
 
   function suggestNextPageNo() {
