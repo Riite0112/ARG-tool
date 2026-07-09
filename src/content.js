@@ -18,7 +18,7 @@
   const SHORTCUT_STYLE_ATTR = "data-arg-scout-shortcut-style";
   const EXTRA_BOTTOM_VAR = "--arg-scout-extra-bottom";
   const BODY_PADDING_BOTTOM_VAR = "--arg-scout-body-padding-bottom";
-  const STATE_VERSION = 7;
+  const STATE_VERSION = 8;
   const DEFAULT_LAYOUT_VIEW = "all";
   const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
   const LEFT_WIDTH = 260;
@@ -47,6 +47,11 @@
       primary: [],
       reserve: []
     },
+    timer: {
+      startedAt: null,
+      elapsedMs: 0,
+      startedOnce: false
+    },
     createdAt: null,
     updatedAt: null
   };
@@ -59,6 +64,7 @@
   let fixedElementObserver = null;
   let fixedElementFrame = 0;
   let originalBodyPaddingBottom = null;
+  let timerTicker = 0;
 
   if (canUseExtensionApi) {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -176,6 +182,7 @@
       layout.host.hidden = true;
       layout.host.style.display = "none";
     }
+    syncTimerTicker();
     resetPageLayout();
   }
 
@@ -211,6 +218,16 @@
           </div>
           <ol id="pageList" class="page-list"></ol>
           <footer class="progress">
+            <div class="timer-box">
+              <div class="timer-label">
+                <span>TIMER</span>
+                <strong id="timerDisplay">00:00:00</strong>
+              </div>
+              <div class="timer-actions">
+                <button id="timerToggleButton" type="button">Start</button>
+                <button id="timerResetButton" type="button">Reset</button>
+              </div>
+            </div>
             <div class="progress-label">
               <span>PROGRESS</span>
               <strong id="progressCount">0 / 0</strong>
@@ -256,6 +273,7 @@
               <li>右上の拡張機能アイコンで表示メニューを開き、ページとキーワードを個別に表示できます。</li>
               <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
               <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
+              <li>左下の <strong>TIMER</strong> を開始すると、ページ保存時の経過時間がページ一覧に記録されます。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
               <li>下のキーワードはクリックでコピー、<strong>×</strong> で削除します。</li>
               <li>ページ右下のファイル番号などは、下バーに隠れないよう自動で上へ退避します。</li>
@@ -299,6 +317,8 @@
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
+    els.timerToggleButton.addEventListener("click", toggleTimer);
+    els.timerResetButton.addEventListener("click", resetTimer);
     els.helpButton.addEventListener("click", toggleHelpPanel);
     els.closeHelpButton.addEventListener("click", closeHelpPanel);
 
@@ -727,6 +747,7 @@
     renderPages();
     renderKeywords();
     renderProgress();
+    renderTimer();
     scheduleProtectFixedElements();
   }
 
@@ -792,11 +813,13 @@
         <span class="page-main">
           <span class="page-key"></span>
           <span class="page-url"></span>
+          <span class="page-time"></span>
         </span>
       `;
 
       openButton.querySelector(".page-key").textContent = page.keyword || page.clue || page.title || "Unspecified";
       openButton.querySelector(".page-url").textContent = page.url;
+      openButton.querySelector(".page-time").textContent = formatEntryElapsed(page.savedElapsedMs);
       openButton.addEventListener("click", () => {
         location.href = page.url;
       });
@@ -890,6 +913,63 @@
     els.targetPagesInput.value = total || "";
   }
 
+  function renderTimer() {
+    if (!els.timerDisplay || !els.timerToggleButton) return;
+
+    const running = isTimerRunning();
+    els.timerDisplay.textContent = formatElapsedMs(currentTimerElapsedMs());
+    els.timerToggleButton.textContent = running ? "Pause" : "Start";
+    els.timerToggleButton.classList.toggle("running", running);
+    els.timerResetButton.disabled = !timerWasStarted();
+    syncTimerTicker();
+  }
+
+  async function toggleTimer() {
+    if (isTimerRunning()) {
+      state.timer.elapsedMs = currentTimerElapsedMs();
+      state.timer.startedAt = null;
+      await saveState();
+      renderTimer();
+      setSaveStatus("タイマーを一時停止しました", false);
+      return;
+    }
+
+    state.timer.startedAt = new Date().toISOString();
+    state.timer.startedOnce = true;
+    await saveState();
+    renderTimer();
+    setSaveStatus("タイマーを開始しました", false);
+  }
+
+  async function resetTimer() {
+    if (!timerWasStarted()) return;
+    if (!confirm("タイマーをリセットしますか？\n保存済みページに記録された時間は残ります。")) return;
+
+    state.timer = {
+      startedAt: null,
+      elapsedMs: 0,
+      startedOnce: false
+    };
+    await saveState();
+    renderTimer();
+    renderPages();
+    setSaveStatus("タイマーをリセットしました", false);
+  }
+
+  function syncTimerTicker() {
+    if (isTimerRunning() && isLayoutVisible()) {
+      if (!timerTicker) {
+        timerTicker = window.setInterval(renderTimer, 1000);
+      }
+      return;
+    }
+
+    if (timerTicker) {
+      window.clearInterval(timerTicker);
+      timerTicker = 0;
+    }
+  }
+
   function syncInputsWithCurrentPage() {
     const current = state.entries.find((entry) => entry.url === location.href);
     els.currentPageInput.value = current?.pageNo || suggestNextPageNo();
@@ -929,6 +1009,7 @@
 
     const now = new Date().toISOString();
     const existing = state.entries.find((entry) => entry.url === location.href || entry.pageNo === pageNo);
+    const timerElapsed = timerWasStarted() ? currentTimerElapsedMs() : existing?.savedElapsedMs ?? null;
     const entry = {
       id: existing?.id || crypto.randomUUID(),
       pageNo,
@@ -939,6 +1020,7 @@
       notes: existing?.notes || "",
       color: existing?.color || "#5ff0b1",
       status: existing?.status || "open",
+      savedElapsedMs: timerElapsed,
       source: MANUAL_SOURCE,
       createdAt: existing?.createdAt || now,
       updatedAt: now
@@ -1208,6 +1290,7 @@
     next.entries.forEach((entry) => addTrackedSiteFromUrl(next, entry.url));
     next.keywords.primary = sanitizeKeywordArray(raw.keywords?.primary);
     next.keywords.reserve = sanitizeKeywordArray(raw.keywords?.reserve);
+    next.timer = sanitizeTimer(raw.timer);
     next.createdAt = raw.createdAt || next.createdAt;
     next.updatedAt = raw.updatedAt || null;
     return next;
@@ -1228,9 +1311,23 @@
       notes: String(entry.notes || ""),
       color: normalizeColor(entry.color) || "#5ff0b1",
       status: ["open", "checked", "solved", "revisit"].includes(entry.status) ? entry.status : "open",
+      savedElapsedMs: parseNonNegativeNumber(entry.savedElapsedMs),
       source: MANUAL_SOURCE,
       createdAt: entry.createdAt || new Date().toISOString(),
       updatedAt: entry.updatedAt || new Date().toISOString()
+    };
+  }
+
+  function sanitizeTimer(timer) {
+    const startedAt = typeof timer?.startedAt === "string" && Number.isFinite(Date.parse(timer.startedAt))
+      ? timer.startedAt
+      : null;
+    const elapsedMs = parseNonNegativeNumber(timer?.elapsedMs) || 0;
+
+    return {
+      startedAt,
+      elapsedMs,
+      startedOnce: Boolean(timer?.startedOnce || startedAt || elapsedMs)
     };
   }
 
@@ -1303,7 +1400,8 @@
       session.keywords.primary.length ||
       session.keywords.reserve.length ||
       session.trackedSites.length ||
-      session.targetPages
+      session.targetPages ||
+      timerWasStarted(session.timer)
     );
   }
 
@@ -1368,10 +1466,43 @@
     return Number.isInteger(number) && number > 0 ? number : null;
   }
 
+  function parseNonNegativeNumber(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+  }
+
   function parsePixelValue(value) {
     if (!value || value === "auto") return null;
     const number = Number.parseFloat(value);
     return Number.isFinite(number) ? number : null;
+  }
+
+  function isTimerRunning(timer = state.timer) {
+    return Boolean(timer?.startedAt && Number.isFinite(Date.parse(timer.startedAt)));
+  }
+
+  function timerWasStarted(timer = state.timer) {
+    return Boolean(timer?.startedOnce || timer?.startedAt || (timer?.elapsedMs || 0) > 0);
+  }
+
+  function currentTimerElapsedMs(timer = state.timer) {
+    const elapsedMs = parseNonNegativeNumber(timer?.elapsedMs) || 0;
+    if (!isTimerRunning(timer)) return elapsedMs;
+
+    return Math.max(0, elapsedMs + Date.now() - Date.parse(timer.startedAt));
+  }
+
+  function formatElapsedMs(value) {
+    const totalSeconds = Math.floor((parseNonNegativeNumber(value) || 0) / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":");
+  }
+
+  function formatEntryElapsed(value) {
+    return parseNonNegativeNumber(value) === null ? "" : `T+ ${formatElapsedMs(value)}`;
   }
 
   function normalizeColor(value) {
@@ -1512,7 +1643,7 @@
         bottom: ${BOTTOM_HEIGHT + 8}px;
         width: 244px;
         display: grid;
-        grid-template-rows: 128px auto minmax(0, 1fr) 58px;
+        grid-template-rows: 128px auto minmax(0, 1fr) 112px;
         overflow: hidden;
         border-radius: 6px;
       }
@@ -1729,7 +1860,8 @@
       }
 
       .page-key,
-      .page-url {
+      .page-url,
+      .page-time {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -1745,12 +1877,75 @@
         font-size: 10px;
       }
 
+      .page-time {
+        color: #19d2a0;
+        font-size: 10px;
+        font-weight: 850;
+      }
+
+      .page-time:empty {
+        display: none;
+      }
+
       .progress {
         display: grid;
         align-content: center;
-        gap: 8px;
+        gap: 7px;
         border-top: 1px solid rgba(72, 95, 127, 0.8);
-        padding: 10px 14px;
+        padding: 8px 12px;
+      }
+
+      .timer-box {
+        display: grid;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .timer-label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: #9daabe;
+        font-size: 10px;
+        font-weight: 900;
+      }
+
+      .timer-label span {
+        margin-right: auto;
+      }
+
+      .timer-label strong {
+        color: #f7fffb;
+        font-size: 13px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .timer-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+
+      .timer-actions button {
+        min-height: 24px;
+        border: 1px solid rgba(72, 95, 127, 0.9);
+        border-radius: 5px;
+        background: rgba(5, 10, 22, 0.88);
+        color: #dce8f2;
+        font-size: 10px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .timer-actions button:hover,
+      .timer-actions button.running {
+        border-color: rgba(25, 210, 160, 0.84);
+        color: #19d2a0;
+      }
+
+      .timer-actions button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
       }
 
       .progress-label,
