@@ -1,7 +1,7 @@
 const STORAGE_KEY = "argScoutState";
 const MENU_SELECTION_ID = "arg-scout-selection";
 const MANUAL_SOURCE = "manual-entry";
-const STATE_VERSION = 10;
+const STATE_VERSION = 11;
 const DEFAULT_LAYOUT_VIEW = "all";
 const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
 const DEFAULT_THEME = "emerald";
@@ -580,6 +580,7 @@ function sanitizeEntry(entry) {
   return {
     id: String(entry.id || crypto.randomUUID()),
     pageNo: parsePositiveInt(entry.pageNo) || 1,
+    pageBranch: normalizePageBranch(entry.pageBranch),
     clue: String(entry.clue || entry.keyword || title),
     title,
     keyword: String(entry.keyword || entry.clue || "").trim(),
@@ -627,6 +628,14 @@ function parseNonNegativeNumber(value) {
   if (value === null || value === undefined || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+}
+
+function normalizePageBranch(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^\p{L}\p{N}_-]/gu, "")
+    .slice(0, 12);
 }
 
 function isTimerRunning(timer) {

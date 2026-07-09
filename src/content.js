@@ -18,7 +18,7 @@
   const SHORTCUT_STYLE_ATTR = "data-arg-scout-shortcut-style";
   const EXTRA_BOTTOM_VAR = "--arg-scout-extra-bottom";
   const BODY_PADDING_BOTTOM_VAR = "--arg-scout-body-padding-bottom";
-  const STATE_VERSION = 10;
+  const STATE_VERSION = 11;
   const DEFAULT_LAYOUT_VIEW = "all";
   const LAYOUT_VIEWS = new Set(["all", "pages", "keywords"]);
   const DEFAULT_THEME = "emerald";
@@ -243,6 +243,10 @@
               <input id="currentPageInput" type="number" min="1" inputmode="numeric" placeholder="1">
             </label>
             <label>
+              SUB
+              <input id="pageBranchInput" type="text" inputmode="numeric" maxlength="12" placeholder="-">
+            </label>
+            <label>
               TARGET #
               <input id="targetPagesInput" type="number" min="1" inputmode="numeric" placeholder="46">
             </label>
@@ -266,7 +270,7 @@
             <ul>
               <li>右上の拡張機能アイコンで表示メニューを開き、ページとキーワードを個別に表示できます。</li>
               <li>別のARGは左上の <strong>+ ARG</strong> で追加し、セレクトで切り替えます。</li>
-              <li><strong>CURRENT</strong> に現在ページ、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
+              <li><strong>CURRENT</strong> に現在ページ、必要なら <strong>SUB</strong> に枝番、<strong>TARGET #</strong> に総ページ数、<strong>KEYWORD</strong> に到達キーワードを入れて保存します。</li>
               <li>拡張機能メニューの <strong>TIMER</strong> を開始すると、ページ保存時の経過時間がページ一覧に記録されます。</li>
               <li>拡張機能メニューの <strong>COPY</strong> をONにすると、ページ上でコピーした文字をキーワードへ一時保存します。</li>
               <li>左のページを押すと登録URLを開き、<strong>×</strong> でページを削除します。</li>
@@ -311,6 +315,7 @@
     els.sessionTitleInput.addEventListener("change", updateSessionTitle);
     els.targetPagesInput.addEventListener("change", updateTargetPages);
     els.currentPageInput.addEventListener("change", clearSaveStatus);
+    els.pageBranchInput.addEventListener("change", clearSaveStatus);
     els.keywordInput.addEventListener("input", clearSaveStatus);
     els.helpButton.addEventListener("click", toggleHelpPanel);
     els.closeHelpButton.addEventListener("click", closeHelpPanel);
@@ -782,8 +787,8 @@
 
       if (page.missing) {
         item.innerHTML = `
-          <div class="page-open page-missing" role="note" aria-label="${page.pageNo}ページ目は未到達">
-            <span class="page-no">${String(page.pageNo).padStart(2, "0")}</span>
+          <div class="page-open page-missing" role="note" aria-label="${formatPageLabel(page)}ページ目は未到達">
+            <span class="page-no">${formatPageLabel(page)}</span>
             <span class="page-main">
               <span class="page-key">未到達のページ</span>
               <span class="page-url">まだ発見・登録されていません</span>
@@ -804,9 +809,9 @@
       const openButton = document.createElement("button");
       openButton.type = "button";
       openButton.className = "page-open";
-      openButton.title = `${page.keyword || page.clue}\n${page.title}\n${page.url}`;
+      openButton.title = `${formatPageLabel(page)}\n${page.keyword || page.clue}\n${page.title}\n${page.url}`;
       openButton.innerHTML = `
-        <span class="page-no">${String(page.pageNo).padStart(2, "0")}</span>
+        <span class="page-no">${formatPageLabel(page)}</span>
         <span class="page-main">
           <span class="page-key"></span>
           <span class="page-url"></span>
@@ -916,8 +921,9 @@
   }
 
   function syncInputsWithCurrentPage() {
-    const current = state.entries.find((entry) => entry.url === location.href);
+    const current = savedPages().find((entry) => entry.url === location.href);
     els.currentPageInput.value = current?.pageNo || suggestNextPageNo();
+    els.pageBranchInput.value = current?.pageBranch || "";
     els.keywordInput.value = current?.keyword || "";
     els.targetPagesInput.value = state.targetPages || "";
   }
@@ -932,6 +938,7 @@
   async function saveCurrentPage(event) {
     event.preventDefault();
     const pageNo = parsePositiveInt(els.currentPageInput.value);
+    const pageBranch = normalizePageBranch(els.pageBranchInput.value);
     const targetPages = parsePositiveInt(els.targetPagesInput.value);
     const keyword = els.keywordInput.value.trim();
 
@@ -953,11 +960,12 @@
     rememberCurrentSite();
 
     const now = new Date().toISOString();
-    const existing = state.entries.find((entry) => entry.url === location.href || entry.pageNo === pageNo);
+    const existing = findExistingPageEntry(pageNo, pageBranch, location.href);
     const timerElapsed = timerWasStarted() ? currentTimerElapsedMs() : existing?.savedElapsedMs ?? null;
     const entry = {
       id: existing?.id || crypto.randomUUID(),
       pageNo,
+      pageBranch,
       clue: keyword,
       title: document.title || keyword,
       keyword,
@@ -1297,6 +1305,7 @@
     return {
       id: String(entry.id || crypto.randomUUID()),
       pageNo: parsePositiveInt(entry.pageNo) || 1,
+      pageBranch: normalizePageBranch(entry.pageBranch),
       clue: String(entry.clue || keyword || title),
       title,
       keyword,
@@ -1413,7 +1422,44 @@
   function savedPages() {
     return [...state.entries]
       .filter((entry) => entry.url)
-      .sort((a, b) => a.pageNo - b.pageNo || a.createdAt.localeCompare(b.createdAt));
+      .sort(comparePageEntries);
+  }
+
+  function comparePageEntries(a, b) {
+    return a.pageNo - b.pageNo
+      || comparePageBranch(a.pageBranch, b.pageBranch)
+      || a.createdAt.localeCompare(b.createdAt);
+  }
+
+  function comparePageBranch(left, right) {
+    const a = normalizePageBranch(left);
+    const b = normalizePageBranch(right);
+    if (a === b) return 0;
+    if (!a) return -1;
+    if (!b) return 1;
+
+    const numberA = Number(a);
+    const numberB = Number(b);
+    if (Number.isFinite(numberA) && Number.isFinite(numberB) && numberA !== numberB) {
+      return numberA - numberB;
+    }
+
+    return a.localeCompare(b, "ja", { numeric: true, sensitivity: "base" });
+  }
+
+  function findExistingPageEntry(pageNo, pageBranch, url) {
+    const branch = normalizePageBranch(pageBranch);
+    return state.entries.find((entry) => {
+      const entryBranch = normalizePageBranch(entry.pageBranch);
+      if (entry.pageNo === pageNo && entryBranch === branch) return true;
+      return entry.url === url && entryBranch === branch;
+    });
+  }
+
+  function formatPageLabel(page) {
+    const pageNo = String(page.pageNo || "").padStart(2, "0");
+    const branch = normalizePageBranch(page.pageBranch);
+    return branch ? `${pageNo}-${branch}` : pageNo;
   }
 
   function allKeywords() {
@@ -1466,6 +1512,14 @@
     if (value === null || value === undefined || value === "") return null;
     const number = Number(value);
     return Number.isFinite(number) && number >= 0 ? Math.floor(number) : null;
+  }
+
+  function normalizePageBranch(value) {
+    return String(value || "")
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/[^\p{L}\p{N}_-]/gu, "")
+      .slice(0, 12);
   }
 
   function parsePixelValue(value) {
@@ -1762,7 +1816,7 @@
 
       .table-head {
         display: grid;
-        grid-template-columns: 36px minmax(0, 1fr);
+        grid-template-columns: 48px minmax(0, 1fr);
         border-bottom: 1px dashed rgba(72, 95, 127, 0.58);
         background: rgba(20, 31, 52, 0.72);
         color: #9daabe;
@@ -1793,7 +1847,7 @@
 
       .page-open {
         display: grid;
-        grid-template-columns: 36px minmax(0, 1fr);
+        grid-template-columns: 48px minmax(0, 1fr);
         width: 100%;
         min-height: 54px;
         border: 0;
@@ -2004,7 +2058,7 @@
 
       .page-form {
         display: grid;
-        grid-template-columns: 84px 92px minmax(220px, 1fr) 92px 92px;
+        grid-template-columns: 76px 60px 92px minmax(190px, 1fr) 92px 92px;
         gap: 8px;
         align-items: end;
         min-height: 0;
