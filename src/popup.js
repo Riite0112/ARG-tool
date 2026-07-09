@@ -14,6 +14,7 @@ const themeLabels = {
 const DEFAULT_THEME = "emerald";
 const THEMES = new Set(Object.keys(themeLabels));
 const FEEDBACK_FORM_URL = String(globalThis.ARG_SCOUT_CONFIG?.feedbackFormUrl || "").trim();
+const SUPPORT_URL = String(globalThis.ARG_SCOUT_CONFIG?.supportUrl || "").trim();
 const els = {};
 const encodingMaps = new Map();
 let selectedPanels = new Set();
@@ -126,7 +127,19 @@ function showFeedbackPlaceholder() {
 }
 
 function showSupportPendingPlaceholder() {
-  setStatus("開発者を応援する導線は準備中です。公開後に案内先を追加できるようにしてあります。", false, true);
+  if (!SUPPORT_URL) {
+    setStatus("応援リンクは準備中です。src/config.js にURLを入れると開けるようになります。", false, true);
+    return;
+  }
+
+  try {
+    const url = new URL(SUPPORT_URL);
+    if (!/^https?:$/.test(url.protocol)) throw new Error("Invalid support URL");
+    chrome.tabs.create({ url: url.href });
+    setStatus("応援ページを開きました。", false, true);
+  } catch {
+    setStatus("応援リンクの形式を確認してください。", true);
+  }
 }
 
 async function hideTool() {
