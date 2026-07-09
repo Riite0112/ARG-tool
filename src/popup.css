@@ -368,6 +368,48 @@ button {
   opacity: 0.48;
 }
 
+.support-pending {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 38px;
+  border: 1px solid rgba(240, 184, 75, 0.58);
+  border-radius: 8px;
+  background: rgba(240, 184, 75, 0.1);
+  color: #f7d48a;
+  cursor: pointer;
+  padding: 8px 11px;
+  text-align: left;
+}
+
+.support-pending:hover {
+  border-color: rgba(240, 184, 75, 0.85);
+  background: rgba(240, 184, 75, 0.14);
+}
+
+.support-pending span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.support-pending strong {
+  border: 1px solid rgba(240, 184, 75, 0.42);
+  border-radius: 999px;
+  color: #f0b84b;
+  font-size: 10px;
+  font-weight: 950;
+  padding: 3px 8px;
+}
+
+.support-pending:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .utility-tools {
   display: grid;
   gap: 8px;

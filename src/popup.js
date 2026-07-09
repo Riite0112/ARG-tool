@@ -44,6 +44,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   els.supportButton.addEventListener("click", showSupportPlaceholder);
+  els.supportPendingButton.addEventListener("click", showSupportPendingPlaceholder);
   els.hideButton.addEventListener("click", hideTool);
   els.hideToolButton.addEventListener("click", hideTool);
   els.timerToggleButton.addEventListener("click", toggleTimer);
@@ -122,6 +123,10 @@ function showSupportPlaceholder() {
   } catch {
     setStatus("フィードバックフォームURLの形式を確認してください。", true);
   }
+}
+
+function showSupportPendingPlaceholder() {
+  setStatus("開発者を応援する導線は準備中です。公開後に案内先を追加できるようにしてあります。", false, true);
 }
 
 async function hideTool() {
