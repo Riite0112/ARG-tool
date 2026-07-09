@@ -17,6 +17,21 @@ const FEEDBACK_FORM_URL = String(globalThis.ARG_SCOUT_CONFIG?.feedbackFormUrl ||
 const SUPPORT_URL = String(globalThis.ARG_SCOUT_CONFIG?.supportUrl || "").trim();
 const els = {};
 const encodingMaps = new Map();
+const mojibakeGarbledEncodings = [
+  { key: "utf-8", name: "UTF-8" },
+  { key: "shift_jis", name: "Shift_JIS" },
+  { key: "euc-jp", name: "EUC-JP" },
+  { key: "windows-1252", name: "Windows-1252" },
+  { key: "latin1", name: "Latin-1" }
+];
+const mojibakeOriginalEncodings = [
+  { key: "utf-8", name: "UTF-8", decode: "utf-8" },
+  { key: "shift_jis", name: "Shift_JIS", decode: "shift_jis" },
+  { key: "euc-jp", name: "EUC-JP", decode: "euc-jp" },
+  { key: "iso-2022-jp", name: "ISO-2022-JP", decode: "iso-2022-jp" }
+];
+const MAX_MOJIBAKE_CANDIDATES = 16;
+const MAX_MOJIBAKE_CHAIN_CANDIDATES = 8;
 let selectedPanels = new Set();
 let timerState = {
   elapsedMs: 0,
@@ -414,38 +429,108 @@ function restoreMojibake(text) {
   const candidates = [];
   const original = text.trim();
 
-  addCandidate(candidates, original, "UTF-8 → Shift_JIS誤読", () => {
-    return decodeBytes(encodeByMap(original, "shift_jis"), "utf-8");
-  });
-  addCandidate(candidates, original, "UTF-8 → Windows-1252誤読", () => {
-    return decodeBytes(encodeByMap(original, "windows-1252"), "utf-8");
-  });
-  addCandidate(candidates, original, "Shift_JIS → Windows-1252誤読", () => {
-    return decodeBytes(encodeByMap(original, "windows-1252"), "shift_jis");
-  });
-  addCandidate(candidates, original, "EUC-JP → Windows-1252誤読", () => {
-    return decodeBytes(encodeByMap(original, "windows-1252"), "euc-jp");
-  });
-  addCandidate(candidates, original, "URLデコード", () => {
-    if (!/%[0-9a-f]{2}/i.test(original)) return "";
-    return decodeURIComponent(original.replace(/\+/g, "%20"));
-  });
-  addCandidate(candidates, original, "HTMLエンティティ解除", () => {
-    if (!/&(?:#\d+|#x[0-9a-f]+|[a-z]+);/i.test(original)) return "";
-    const textarea = document.createElement("textarea");
-    textarea.innerHTML = original;
-    return textarea.value;
+  collectStructuredDecodeCandidates(candidates, original, original);
+  collectEncodingRepairCandidates(candidates, original, original);
+
+  const firstPass = [...candidates]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_MOJIBAKE_CHAIN_CANDIDATES);
+
+  firstPass.forEach((candidate) => {
+    const prefix = `二重復元: ${candidate.label} / `;
+    collectStructuredDecodeCandidates(candidates, original, candidate.value, prefix);
+    collectEncodingRepairCandidates(candidates, original, candidate.value, prefix);
   });
 
-  return candidates.sort((a, b) => japaneseScore(b.value) - japaneseScore(a.value));
+  return candidates
+    .sort((a, b) => b.score - a.score || a.label.localeCompare(b.label, "ja"))
+    .slice(0, MAX_MOJIBAKE_CANDIDATES)
+    .map(({ label, value }) => ({ label, value }));
 }
 
-function addCandidate(candidates, original, label, factory) {
+function collectEncodingRepairCandidates(candidates, original, source, prefix = "") {
+  mojibakeGarbledEncodings.forEach((garbledEncoding) => {
+    mojibakeOriginalEncodings.forEach((originalEncoding) => {
+      if (garbledEncoding.key === originalEncoding.key) return;
+      addCandidate(
+        candidates,
+        original,
+        `${prefix}${originalEncoding.name} → ${garbledEncoding.name}誤読`,
+        () => decodeBytes(encodeByLabel(source, garbledEncoding.key), originalEncoding.decode)
+      );
+    });
+  });
+}
+
+function collectStructuredDecodeCandidates(candidates, original, source, prefix = "") {
+  collectUrlDecodeCandidates(candidates, original, source, prefix);
+
+  addCandidate(candidates, original, `${prefix}HTMLエンティティ解除`, () => {
+    if (!/&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]+);/i.test(source)) return "";
+    const textarea = document.createElement("textarea");
+    textarea.innerHTML = source;
+    return textarea.value;
+  }, { always: true });
+
+  addCandidate(candidates, original, `${prefix}Unicodeエスケープ解除`, () => {
+    if (!/(?:\\u\{?[0-9a-f]{4,6}\}?|\\x[0-9a-f]{2}|%u[0-9a-f]{4})/i.test(source)) return "";
+    return decodeUnicodeEscapes(source);
+  }, { allowPlain: true });
+
+  collectByteTextCandidates(candidates, original, source, prefix, "Base64", decodeBase64Bytes(source));
+  collectByteTextCandidates(candidates, original, source, prefix, "16進", decodeHexBytes(source));
+}
+
+function collectUrlDecodeCandidates(candidates, original, source, prefix) {
+  if (!/%(?:[0-9a-f]{2}|u[0-9a-f]{4})/i.test(source)) return;
+
+  let current = source;
+  for (let round = 1; round <= 3; round += 1) {
+    let decoded = "";
+    try {
+      decoded = decodeURIComponent(current.replace(/\+/g, "%20"));
+    } catch {
+      decoded = "";
+    }
+    if (!decoded || decoded === current) break;
+    addCandidate(
+      candidates,
+      original,
+      `${prefix}${round === 1 ? "URLデコード" : `URLデコード x${round}`}`,
+      () => decoded,
+      { allowPlain: true }
+    );
+    current = decoded;
+  }
+
+  addCandidate(candidates, original, `${prefix}%u Unicode解除`, () => {
+    if (!/%u[0-9a-f]{4}/i.test(source)) return "";
+    return decodeUnicodeEscapes(source);
+  }, { allowPlain: true });
+}
+
+function collectByteTextCandidates(candidates, original, source, prefix, sourceLabel, bytes) {
+  if (!bytes?.length) return;
+  mojibakeOriginalEncodings.forEach((encoding) => {
+    addCandidate(
+      candidates,
+      original,
+      `${prefix}${sourceLabel} ${encoding.name}`,
+      () => decodeBytes(bytes, encoding.decode),
+      { allowPlain: true }
+    );
+  });
+}
+
+function addCandidate(candidates, original, label, factory, options = {}) {
   try {
-    const value = String(factory() || "").trim();
+    const value = normalizeDecodedText(factory());
     if (!value || value === original || value.includes("\uFFFD")) return;
+    if (hasInvalidControlCharacters(value)) return;
     if (candidates.some((candidate) => candidate.value === value)) return;
-    candidates.push({ label, value });
+    const score = mojibakeScore(value, original);
+    if (!options.always && score < 2 && !(options.allowPlain && isMostlyPrintableText(value))) return;
+    candidates.push({ label, value, score });
   } catch {
     // Unsupported encodings or invalid byte sequences are just skipped.
   }
@@ -454,6 +539,12 @@ function addCandidate(candidates, original, label, factory) {
 function decodeBytes(bytes, label) {
   if (!bytes?.length) return "";
   return new TextDecoder(label, { fatal: true }).decode(bytes);
+}
+
+function encodeByLabel(text, label) {
+  if (label === "utf-8") return new TextEncoder().encode(text);
+  if (label === "latin1") return encodeLatin1(text);
+  return encodeByMap(text, label);
 }
 
 function encodeByMap(text, label) {
@@ -472,7 +563,14 @@ function encodeByMap(text, label) {
 function getEncodingMap(label) {
   if (encodingMaps.has(label)) return encodingMaps.get(label);
 
-  const map = label === "shift_jis" ? buildShiftJisEncodeMap() : buildSingleByteEncodeMap(label);
+  let map = null;
+  if (label === "shift_jis") {
+    map = buildShiftJisEncodeMap();
+  } else if (label === "euc-jp") {
+    map = buildEucJpEncodeMap();
+  } else {
+    map = buildSingleByteEncodeMap(label);
+  }
   encodingMaps.set(label, map);
   return map;
 }
@@ -530,10 +628,125 @@ function buildShiftJisEncodeMap() {
   return map;
 }
 
-function japaneseScore(value) {
-  const japanese = value.match(/[\u3040-\u30ff\u3400-\u9fff]/g)?.length || 0;
+function buildEucJpEncodeMap() {
+  const decoder = new TextDecoder("euc-jp", { fatal: true });
+  const map = new Map();
+  const add = (bytes) => {
+    try {
+      const char = decoder.decode(new Uint8Array(bytes));
+      if (char && !map.has(char)) map.set(char, bytes);
+    } catch {
+      // Invalid EUC-JP sequences are ignored.
+    }
+  };
+
+  for (let byte = 0x00; byte <= 0x7F; byte += 1) add([byte]);
+  for (let trail = 0xA1; trail <= 0xDF; trail += 1) add([0x8E, trail]);
+
+  for (let lead = 0xA1; lead <= 0xFE; lead += 1) {
+    for (let trail = 0xA1; trail <= 0xFE; trail += 1) {
+      add([lead, trail]);
+      add([0x8F, lead, trail]);
+    }
+  }
+
+  return map;
+}
+
+function encodeLatin1(text) {
+  const bytes = [];
+  for (const char of text) {
+    const code = char.codePointAt(0);
+    if (code > 0xFF) return null;
+    bytes.push(code);
+  }
+  return new Uint8Array(bytes);
+}
+
+function decodeUnicodeEscapes(value) {
+  return value
+    .replace(/%u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\u\{([0-9a-f]{1,6})\}/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\x([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
+function decodeBase64Bytes(value) {
+  const compact = value.trim().replace(/\s+/g, "");
+  if (compact.length < 8) return null;
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(compact)) return null;
+
+  const normalized = compact.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  if (padded.length % 4 !== 0) return null;
+
+  try {
+    const binary = atob(padded);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+function decodeHexBytes(value) {
+  const trimmed = value.trim();
+  const separatedHex = /^(?:0x)?[0-9a-f]{2}(?:[\s,;:_-]+(?:0x)?[0-9a-f]{2})+$/i;
+  const plainHex = /^[0-9a-f]{6,}$/i;
+  if (!separatedHex.test(trimmed) && !plainHex.test(trimmed)) return null;
+
+  const hex = trimmed.replace(/0x/gi, "").replace(/[^0-9a-f]/gi, "");
+  if (hex.length < 6 || hex.length % 2 !== 0) return null;
+
+  const bytes = [];
+  for (let index = 0; index < hex.length; index += 2) {
+    bytes.push(parseInt(hex.slice(index, index + 2), 16));
+  }
+  return new Uint8Array(bytes);
+}
+
+function normalizeDecodedText(value) {
+  return String(value || "").replace(/\r\n/g, "\n").trim();
+}
+
+function hasInvalidControlCharacters(value) {
+  return /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\uE000-\uF8FF]/.test(value);
+}
+
+function isMostlyPrintableText(value) {
+  if (!/[A-Za-z0-9ぁ-んァ-ン一-龯]/.test(value)) return false;
+  const printable = value.replace(/[\t\n\r ]/g, "").replace(/[\p{P}\p{S}]/gu, "");
+  return printable.length >= Math.max(2, Math.floor(value.length * 0.35));
+}
+
+function mojibakeScore(value, original) {
+  const hiragana = value.match(/[\u3040-\u309f]/g)?.length || 0;
+  const katakana = value.match(/[\u30a0-\u30ff]/g)?.length || 0;
+  const kanji = value.match(/[\u3400-\u9fff]/g)?.length || 0;
+  const japanese = hiragana + katakana + kanji;
   const ascii = value.match(/[A-Za-z0-9]/g)?.length || 0;
-  return japanese * 3 + ascii;
+  const readableSymbols = value.match(/[ 　。、・！？!?.,:;'"()[\]{}<>「」『』【】ー\-_/]/g)?.length || 0;
+  const urlBonus = /https?:\/\/|www\.|[A-Za-z0-9.-]+\.[A-Za-z]{2,}/.test(value) ? 8 : 0;
+  const mojibakeBefore = mojibakePenalty(original);
+  const mojibakeAfter = mojibakePenalty(value);
+  const cleanupBonus = mojibakeBefore > mojibakeAfter ? 8 : 0;
+  const japaneseBonus = japanese > 0 ? 16 : 0;
+
+  return (
+    hiragana * 12
+    + katakana * 8
+    + kanji * 3
+    + Math.min(ascii, 40) * 0.6
+    + Math.min(readableSymbols, 30) * 0.2
+    + urlBonus
+    + cleanupBonus
+    + japaneseBonus
+    - mojibakeAfter * 6
+  );
+}
+
+function mojibakePenalty(value) {
+  const signatures = value.match(/(?:�|ã|Ã|Â|縺|繧|繝|譁|荳|莠|髯|隕|驥|邱|螟|蜿|逕|鬟|螢|裔|瘤|膰|鐔|[\u0080-\u009F\uFF61-\uFF9F\uE000-\uF8FF])/g);
+  return signatures?.length || 0;
 }
 
 async function readQrFile() {
