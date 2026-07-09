@@ -50,21 +50,21 @@ button {
 
 .popup-shell {
   display: grid;
-  gap: 10px;
-  min-height: 312px;
-  padding: 12px;
+  gap: 7px;
+  min-height: 0;
+  padding: 10px;
 }
 
 .popup-head {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) 30px;
+  grid-template-columns: 32px minmax(0, 1fr) 28px;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .popup-icon {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
 }
 
@@ -75,7 +75,7 @@ button {
 }
 
 .title-block strong {
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .title-block span {
@@ -89,8 +89,8 @@ button {
 .icon-button {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border: 1px solid rgba(77, 101, 136, 0.9);
   border-radius: 6px;
   background: rgba(8, 14, 27, 0.72);
@@ -110,11 +110,11 @@ button {
 
 .session-card {
   display: grid;
-  gap: 10px;
+  gap: 7px;
   border: 1px solid rgba(77, 101, 136, 0.85);
   border-radius: 8px;
   background: rgba(13, 19, 32, 0.94);
-  padding: 11px;
+  padding: 9px;
 }
 
 .session-title-row {
@@ -138,7 +138,7 @@ button {
   color: var(--popup-accent);
   font-size: 10px;
   font-weight: 800;
-  padding: 3px 8px;
+  padding: 2px 7px;
 }
 
 .state-pill.hidden {
@@ -149,7 +149,7 @@ button {
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
+  gap: 5px;
 }
 
 .metrics span {
@@ -161,23 +161,23 @@ button {
   color: #9daabe;
   font-size: 10px;
   font-weight: 850;
-  padding: 7px;
+  padding: 6px;
 }
 
 .metrics strong {
   color: #f7fffb;
-  font-size: 18px;
+  font-size: 17px;
 }
 
 .timer-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 68px 68px;
+  grid-template-columns: minmax(0, 1fr) 62px 62px;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border: 1px solid rgba(77, 101, 136, 0.68);
   border-radius: 6px;
   background: rgba(5, 10, 22, 0.78);
-  padding: 8px;
+  padding: 6px;
 }
 
 .timer-card div {
@@ -194,13 +194,13 @@ button {
 
 .timer-card strong {
   color: #f7fffb;
-  font-size: 20px;
+  font-size: 18px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
 
 .timer-card button {
-  min-height: 30px;
+  min-height: 28px;
   border: 1px solid rgba(77, 101, 136, 0.9);
   border-radius: 6px;
   background: rgba(8, 14, 27, 0.72);
@@ -225,7 +225,7 @@ button {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .theme-card small {
@@ -237,11 +237,11 @@ button {
 .theme-options {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
+  gap: 5px;
 }
 
 .theme-options button {
-  min-height: 28px;
+  min-height: 26px;
   border: 1px solid rgba(77, 101, 136, 0.78);
   border-radius: 6px;
   background: rgba(5, 10, 22, 0.78);
@@ -267,11 +267,11 @@ button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 68px;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   border: 1px solid rgba(77, 101, 136, 0.68);
   border-radius: 6px;
   background: rgba(5, 10, 22, 0.78);
-  padding: 8px;
+  padding: 6px;
 }
 
 .copy-card div {
@@ -295,7 +295,7 @@ button {
 }
 
 .copy-card button {
-  min-height: 30px;
+  min-height: 28px;
   border: 1px solid rgba(77, 101, 136, 0.9);
   border-radius: 6px;
   background: rgba(8, 14, 27, 0.72);
@@ -328,15 +328,15 @@ button {
 .tool-tab {
   display: grid;
   place-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  min-height: 78px;
+  min-height: 62px;
   border: 0;
   border-right: 1px solid rgba(77, 101, 136, 0.45);
   background: transparent;
   color: #9daabe;
   cursor: pointer;
-  padding: 8px 4px;
+  padding: 6px 4px;
 }
 
 .tool-tab:last-child {
@@ -365,20 +365,20 @@ button {
 
 .menu-actions {
   display: grid;
-  gap: 7px;
+  gap: 6px;
 }
 
 .menu-action {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  min-height: 38px;
+  min-height: 34px;
   border: 1px solid rgba(77, 101, 136, 0.85);
   border-radius: 8px;
   background: rgba(8, 12, 23, 0.94);
   color: #cfe2f2;
   cursor: pointer;
-  padding: 9px 12px;
+  padding: 7px 10px;
   text-align: left;
 }
 
@@ -415,21 +415,21 @@ button {
 
 .utility-tools {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   border: 1px solid rgba(77, 101, 136, 0.85);
   border-radius: 8px;
   background: rgba(8, 12, 23, 0.94);
-  padding: 8px;
+  padding: 6px;
 }
 
 .utility-tabs {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  gap: 5px;
 }
 
 .utility-tab {
-  min-height: 32px;
+  min-height: 30px;
   border: 1px solid rgba(77, 101, 136, 0.78);
   border-radius: 6px;
   background: rgba(5, 10, 22, 0.78);
@@ -560,13 +560,13 @@ button {
 .tab-icon {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: 1px solid rgba(77, 101, 136, 0.8);
   border-radius: 7px;
   background: rgba(17, 28, 48, 0.9);
   color: inherit;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 950;
 }
 
@@ -589,7 +589,7 @@ button {
 }
 
 .status-text {
-  min-height: 32px;
+  min-height: 28px;
   margin: 0;
   border: 1px solid rgba(77, 101, 136, 0.6);
   border-radius: 8px;
@@ -597,7 +597,7 @@ button {
   color: #c4d3e3;
   font-size: 12px;
   line-height: 1.45;
-  padding: 8px 10px;
+  padding: 6px 9px;
 }
 
 .status-text.ok {
