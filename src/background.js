@@ -589,7 +589,7 @@ function sanitizeEntry(entry) {
     color: /^#[0-9a-f]{6}$/i.test(String(entry.color || "")) ? entry.color : "#5ff0b1",
     status: ["open", "checked", "solved", "revisit"].includes(entry.status) ? entry.status : "open",
     savedElapsedMs: parseNonNegativeNumber(entry.savedElapsedMs),
-    source: entry.source === MANUAL_SOURCE ? MANUAL_SOURCE : MANUAL_SOURCE,
+    source: MANUAL_SOURCE,
     createdAt: entry.createdAt || new Date().toISOString(),
     updatedAt: entry.updatedAt || new Date().toISOString()
   };

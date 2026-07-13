@@ -28,6 +28,7 @@
   const COMPACT_LEFT_WIDTH = 217;
   const COMPACT_BOTTOM_HEIGHT = 220;
   const PROTECTED_TAGS = new Set(["script", "style", "link", "meta", "title", "noscript"]);
+  const PROTECT_PASS_MIN_INTERVAL_MS = 250;
   const canUseExtensionApi = typeof chrome !== "undefined" && Boolean(chrome.storage?.local);
 
   const initialStore = {
@@ -67,7 +68,11 @@
   let els = {};
   let fixedElementObserver = null;
   let fixedElementFrame = 0;
+  let fixedElementTimer = 0;
+  let fixedElementFullPass = false;
+  let lastProtectPassAt = 0;
   let originalBodyPaddingBottom = null;
+  const appliedProtections = new Map();
 
   if (canUseExtensionApi) {
     document.addEventListener("copy", handleCopyEvent, true);
@@ -125,7 +130,8 @@
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local" || !layout) return;
 
-      if (changes[STORAGE_KEY]?.newValue) {
+      // Skip the echo of this tab's own saveState(); the UI is already rendered.
+      if (changes[STORAGE_KEY]?.newValue && changes[STORAGE_KEY].newValue.updatedAt !== store.updatedAt) {
         store = sanitizeStore(changes[STORAGE_KEY].newValue);
         state = resolveSessionForCurrentUrl(store, { create: false }) || state;
         if (isHiddenUrl(location.href)) {
@@ -163,8 +169,8 @@
     await consumePendingSelection();
     layout.host.hidden = false;
     layout.host.style.display = "";
-    scheduleProtectFixedElements();
-    window.setTimeout(scheduleProtectFixedElements, 350);
+    scheduleFullProtectPass();
+    window.setTimeout(scheduleFullProtectPass, 350);
     syncInputsWithCurrentPage();
     renderAll();
   }
@@ -299,7 +305,6 @@
       closeHelpPanel();
     }
     applyPageLayout();
-    scheduleProtectFixedElements();
   }
 
   function bindLayoutElements() {
@@ -371,7 +376,7 @@
       }
     `;
     startFixedElementProtection();
-    scheduleProtectFixedElements();
+    scheduleFullProtectPass();
   }
 
   function resetPageLayout() {
@@ -400,8 +405,8 @@
   }
 
   function startFixedElementProtection() {
-    window.removeEventListener("resize", scheduleProtectFixedElements);
-    window.addEventListener("resize", scheduleProtectFixedElements, { passive: true });
+    window.removeEventListener("resize", scheduleFullProtectPass);
+    window.addEventListener("resize", scheduleFullProtectPass, { passive: true });
 
     if (!document.body || fixedElementObserver) return;
 
@@ -415,37 +420,101 @@
   }
 
   function stopFixedElementProtection() {
-    window.removeEventListener("resize", scheduleProtectFixedElements);
+    window.removeEventListener("resize", scheduleFullProtectPass);
     if (fixedElementFrame) {
       cancelAnimationFrame(fixedElementFrame);
       fixedElementFrame = 0;
     }
+    if (fixedElementTimer) {
+      window.clearTimeout(fixedElementTimer);
+      fixedElementTimer = 0;
+    }
+    fixedElementFullPass = false;
     fixedElementObserver?.disconnect();
     fixedElementObserver = null;
   }
 
+  function scheduleFullProtectPass() {
+    fixedElementFullPass = true;
+    if (fixedElementTimer) {
+      window.clearTimeout(fixedElementTimer);
+      fixedElementTimer = 0;
+    }
+    requestProtectFrame();
+  }
+
   function scheduleProtectFixedElements() {
+    if (fixedElementFrame || fixedElementTimer) return;
+
+    const wait = PROTECT_PASS_MIN_INTERVAL_MS - (Date.now() - lastProtectPassAt);
+    if (wait <= 0) {
+      requestProtectFrame();
+      return;
+    }
+    fixedElementTimer = window.setTimeout(() => {
+      fixedElementTimer = 0;
+      requestProtectFrame();
+    }, wait);
+  }
+
+  function requestProtectFrame() {
     if (fixedElementFrame) return;
     fixedElementFrame = requestAnimationFrame(() => {
       fixedElementFrame = 0;
-      protectFixedPageElements();
+      lastProtectPassAt = Date.now();
+      const fullPass = fixedElementFullPass;
+      fixedElementFullPass = false;
+      protectFixedPageElements(fullPass);
     });
   }
 
-  function protectFixedPageElements() {
+  function protectFixedPageElements(fullPass) {
     if (!isLayoutVisible() || !document.body) return;
 
-    restorePageFixedElements();
+    if (fullPass) {
+      restorePageFixedElements();
+    }
+
+    for (const node of appliedProtections.keys()) {
+      if (!node.isConnected) appliedProtections.delete(node);
+    }
 
     const metrics = currentLayoutMetrics();
-    const candidates = [...document.body.querySelectorAll("*")];
-    suppressShortcutHelpPanels(candidates);
-
+    const shortcutPanels = [];
+    const pendingProtections = [];
     let extraBottom = 0;
-    candidates.forEach((node) => {
-      const protection = getFixedElementProtection(node, metrics);
-      if (!protection) return;
+
+    for (const node of document.body.querySelectorAll("*")) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (PROTECTED_TAGS.has(node.localName)) continue;
+      if (node === layout?.host || node.closest("arg-scout-layout")) continue;
+
+      const applied = appliedProtections.get(node);
+      if (applied) {
+        // Already-offset nodes keep the protection computed from their original
+        // geometry; re-measuring them here would read the shifted position.
+        // A full pass restores everything first when fresh geometry is needed.
+        extraBottom = Math.max(extraBottom, applied.scrollGap || 0);
+        continue;
+      }
+
+      const style = getComputedStyle(node);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) continue;
+
+      if (isShortcutHelpPanel(node, style)) {
+        shortcutPanels.push(node);
+        continue;
+      }
+
+      const protection = getFixedElementProtection(node, style, metrics);
+      if (!protection) continue;
       extraBottom = Math.max(extraBottom, protection.scrollGap || 0);
+      pendingProtections.push([node, protection]);
+    }
+
+    suppressShortcutHelpPanels(shortcutPanels);
+    pendingProtections.forEach(([node, protection]) => {
+      appliedProtections.set(node, protection);
       offsetFixedElement(node, protection);
     });
     updatePageScrollSpace(metrics.bottom, metrics.bottom ? extraBottom : 0);
@@ -488,22 +557,15 @@
     spacer.dataset.argScoutHeight = String(safeHeight);
   }
 
-  function suppressShortcutHelpPanels(candidates) {
-    const panels = candidates.filter(isShortcutHelpPanel);
+  function suppressShortcutHelpPanels(panels) {
     panels.forEach((node) => {
       if (panels.some((panel) => panel !== node && panel.contains(node))) return;
       hideShortcutHelpPanel(node);
     });
   }
 
-  function isShortcutHelpPanel(node) {
-    if (!(node instanceof HTMLElement)) return false;
-    if (node === layout?.host || node.closest("arg-scout-layout")) return false;
-    if (PROTECTED_TAGS.has(node.localName)) return false;
-
-    const style = getComputedStyle(node);
+  function isShortcutHelpPanel(node, style) {
     if (!["absolute", "fixed", "sticky"].includes(style.position)) return false;
-    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
 
     const rect = node.getBoundingClientRect();
     if (rect.width < Math.min(360, window.innerWidth * 0.25)) return false;
@@ -544,6 +606,7 @@
   }
 
   function restorePageFixedElements() {
+    appliedProtections.clear();
     document.querySelectorAll(`[${FIXED_OFFSET_ATTR}]`).forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
 
@@ -575,21 +638,21 @@
     });
   }
 
-  function getFixedElementProtection(node, metrics) {
-    if (!(node instanceof HTMLElement)) return false;
-    if (node === layout?.host || node.closest("arg-scout-layout")) return false;
-    if (PROTECTED_TAGS.has(node.localName)) return false;
-
-    const style = getComputedStyle(node);
-    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+  function getFixedElementProtection(node, style, metrics) {
+    const isFixed = style.position === "fixed";
+    const viewportAppCandidate = Boolean(metrics.bottom)
+      && !isFixed
+      && style.position !== "absolute"
+      && style.position !== "sticky"
+      && node.parentElement === document.body;
+    if (!isFixed && !viewportAppCandidate) return false;
 
     const rect = node.getBoundingClientRect();
     if (rect.width < 1 || rect.height < 1) return false;
 
-    const viewportAppProtection = getViewportAppProtection(node, style, rect, metrics);
-    if (viewportAppProtection) return viewportAppProtection;
-
-    if (style.position !== "fixed") return false;
+    if (viewportAppCandidate) {
+      return getViewportAppProtection(node, style, rect, metrics);
+    }
 
     const overlapsBottomTool = rect.bottom > window.innerHeight - metrics.bottom - 4;
     const overlapsLeftTool = rect.left < metrics.left + 4;
@@ -632,9 +695,6 @@
   }
 
   function getViewportAppProtection(node, style, rect, metrics) {
-    if (!metrics.bottom) return false;
-    if (node.parentElement !== document.body) return false;
-    if (["fixed", "absolute", "sticky"].includes(style.position)) return false;
     if (rect.top > 12) return false;
     if (rect.height < window.innerHeight * 0.72) return false;
     if (rect.bottom < window.innerHeight - metrics.bottom + 24) return false;

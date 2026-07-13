@@ -808,8 +808,30 @@ async function detectQrCodes(bitmap) {
   const nativeCodes = await detectQrWithBarcodeDetector(bitmap);
   if (nativeCodes.length) return nativeCodes;
 
+  await ensureJsQrLoaded();
   const jsQrCode = detectQrWithJsQr(bitmap);
   return jsQrCode ? [jsQrCode] : [];
+}
+
+let jsQrLoadPromise = null;
+
+// jsQR (~250KB) is only needed when BarcodeDetector is unavailable, so it is
+// loaded on demand instead of on every popup open.
+function ensureJsQrLoaded() {
+  if (typeof globalThis.jsQR === "function") return Promise.resolve();
+
+  jsQrLoadPromise ??= new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "src/vendor/jsQR.js";
+    script.onload = () => resolve();
+    script.onerror = () => {
+      jsQrLoadPromise = null;
+      script.remove();
+      reject(new Error("QR読取ライブラリを読み込めませんでした。"));
+    };
+    document.head.append(script);
+  });
+  return jsQrLoadPromise;
 }
 
 async function detectQrWithBarcodeDetector(bitmap) {
