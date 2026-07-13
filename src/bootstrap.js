@@ -14,7 +14,7 @@
   chrome.storage.local.get([STORAGE_KEY])
     .then((result) => {
       if (!shouldAutoOpen(result[STORAGE_KEY], base)) return;
-      return chrome.runtime.sendMessage({ type: "ARG_SCOUT_SHOW_LAYOUT" });
+      return chrome.runtime.sendMessage({ type: "ARG_SCOUT_SHOW_LAYOUT", autoOpen: true });
     })
     .catch(() => {
       // Auto-open is a convenience; the toolbar button still opens the tool.
@@ -23,9 +23,12 @@
   function shouldAutoOpen(state, origin) {
     if (!state || typeof state !== "object") return false;
     const sessions = Array.isArray(state.sessions) ? state.sessions : [state];
-    return sessions.some((session) =>
-      Array.isArray(session?.trackedSites)
-      && session.trackedSites.includes(origin)
+    const active = sessions.find((session) => session?.id === state.activeSessionId);
+    const session = active?.trackedSites?.includes(origin)
+      ? active
+      : sessions.find((candidate) => candidate?.trackedSites?.includes(origin));
+    return Boolean(
+      session
       && !(Array.isArray(session.hiddenSites) && session.hiddenSites.includes(origin))
     );
   }

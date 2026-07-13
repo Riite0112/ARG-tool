@@ -24,7 +24,7 @@ chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   const store = await loadState();
   const session = resolveSessionForUrl(store, tab.url, { create: false });
   if (session && isTrackedUrl(tab.url, session) && !isHiddenUrl(tab.url, session)) {
-    await showLayout(tab, { rememberSite: false });
+    await showLayout(tab, { rememberSite: false, autoOpen: true });
   }
 });
 
@@ -60,6 +60,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "ARG_SCOUT_SHOW_LAYOUT") {
     showLayout(message.tab || sender.tab, {
       rememberSite: Boolean(message.rememberSite),
+      autoOpen: Boolean(message.autoOpen),
       view: message.view
     })
       .then(() => sendResponse({ ok: true }))
@@ -329,6 +330,12 @@ async function forceHideLayout(tab) {
 async function showLayout(tab, options = {}) {
   if (!isSavableTab(tab) || tab.id == null) return;
 
+  if (options.autoOpen) {
+    const store = await loadState();
+    const session = resolveSessionForUrl(store, tab.url, { create: false });
+    if (!session || !isTrackedUrl(tab.url, session) || isHiddenUrl(tab.url, session)) return;
+  }
+
   if (options.rememberSite) {
     const store = await loadState();
     let session = resolveSessionForUrl(store, tab.url, { create: false });
@@ -345,6 +352,7 @@ async function showLayout(tab, options = {}) {
   const message = {
     type: "ARG_SCOUT_SHOW_LAYOUT",
     rememberSite: Boolean(options.rememberSite),
+    clearHidden: Boolean(options.rememberSite),
     view: normalizeLayoutView(options.view)
   };
 
